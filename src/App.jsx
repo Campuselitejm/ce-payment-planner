@@ -6,6 +6,71 @@ import * as api from "./api.js";
 const COORD_COLORS = ["#2563EB", "#7C3AED", "#F5B400", "#1D4ED8", "#0EA5E9", "#DB2777"];
 const colorFor = (i) => COORD_COLORS[i % COORD_COLORS.length];
 
+// ---------- shared bits ----------
+const Center = ({ children }) => (
+  <div className="min-h-screen grid place-items-center px-4">{children}</div>
+);
+const Spinner = () => (
+  <div className="w-8 h-8 border-2 border-slate-200 border-t-brandblue rounded-full animate-spin" />
+);
+function Brand() {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="w-9 h-9 rounded-xl grid place-items-center text-white font-extrabold"
+        style={{ background: "linear-gradient(140deg,#2563EB,#7C3AED)" }}>CE</div>
+      <div className="leading-tight">
+        <div className="font-bold text-[15px]">Payment Plans</div>
+        <div className="text-[11px] tracking-wider uppercase text-slate-400">Varsity SZN 6</div>
+      </div>
+    </div>
+  );
+}
+const NavBtn = ({ on, children, ...p }) => (
+  <button {...p} className={`text-[13px] font-semibold px-4 py-2 rounded-lg whitespace-nowrap ${on ? "bg-brandblue text-white" : "text-slate-500"}`}>{children}</button>
+);
+const Stat = ({ k, v, sub, tone }) => (
+  <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+    <div className="text-xs text-slate-500 font-medium">{k}</div>
+    <div className={`text-[22px] font-extrabold mt-1.5 tabular-nums ${tone}`}>{v} {sub && <span className="text-xs text-slate-400 font-semibold">{sub}</span>}</div>
+  </div>
+);
+const Row = ({ l, v, warn }) => (
+  <div className="flex justify-between text-[13px] text-slate-500 mt-2.5"><span>{l}</span><b className={`tabular-nums ${warn ? "text-amber-600" : "text-slate-900"}`}>{v}</b></div>
+);
+const Field = ({ label, children }) => (
+  <label className="block mb-4"><span className="text-[13px] font-semibold text-slate-600">{label}</span>{children}</label>
+);
+const INP = "w-full border border-slate-200 rounded-xl px-4 py-3 mt-1.5 text-sm focus:outline-none focus:border-brandblue focus:ring-2 focus:ring-blue-100";
+const FileRow = ({ file, setFile }) => (
+  <label className="flex items-center gap-2 text-[13px] text-slate-500 cursor-pointer">
+    <span className="px-3 py-2 rounded-lg border border-slate-200 font-semibold">{file ? "Receipt attached" : "Attach receipt"}</span>
+    <input type="file" className="hidden" onChange={(e) => setFile(e.target.files[0])} accept="image/*,application/pdf" />
+  </label>
+);
+const MiniStat = ({ k, v, tone }) => (
+  <div className="bg-slate-50 rounded-xl p-3">
+    <div className="text-[11px] text-slate-500 font-medium">{k}</div>
+    <div className={`text-[15px] font-extrabold tabular-nums mt-0.5 ${tone || "text-slate-900"}`}>{v}</div>
+  </div>
+);
+const ActionBox = ({ title, note, children }) => (
+  <div className="border border-slate-200 rounded-2xl p-4 mb-4">
+    <div className="font-bold text-[15px] mb-1">{title}</div>
+    <p className="text-[13px] text-slate-500 mb-3">{note}</p>
+    {children}
+  </div>
+);
+const PrimaryBtn = ({ busy, children, ...p }) => (
+  <button {...p} disabled={busy} className="py-2.5 px-4 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? "Working…" : children}</button>
+);
+const Overlay = ({ children, onClose }) => (
+  <div className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
+    <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      {children}
+    </div>
+  </div>
+);
+
 // =====================================================================
 export default function App() {
   const [session, setSession] = useState(null);
@@ -31,26 +96,6 @@ export default function App() {
   return <Dashboard profile={profile} />;
 }
 
-// ---------- shared bits ----------
-const Center = ({ children }) => (
-  <div className="min-h-screen grid place-items-center px-4">{children}</div>
-);
-const Spinner = () => (
-  <div className="w-8 h-8 border-2 border-slate-200 border-t-brandblue rounded-full animate-spin" />
-);
-function Brand() {
-  return (
-    <div className="flex items-center gap-2.5">
-      <div className="w-9 h-9 rounded-xl grid place-items-center text-white font-extrabold"
-        style={{ background: "linear-gradient(140deg,#2563EB,#7C3AED)" }}>CE</div>
-      <div className="leading-tight">
-        <div className="font-bold text-[15px]">Payment Plans</div>
-        <div className="text-[11px] tracking-wider uppercase text-slate-400">Varsity SZN 6</div>
-      </div>
-    </div>
-  );
-}
-
 // ---------- LOGIN ----------
 function Login() {
   const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
@@ -69,7 +114,7 @@ function Login() {
         <p className="text-slate-500 text-sm text-center mb-5">Coordinator & super-admin access</p>
         {err && <div className="bg-amber-50 text-amber-700 text-sm rounded-xl p-3 mb-3">{err}</div>}
         <input className="w-full border border-slate-200 rounded-xl px-4 py-3 mb-3 text-sm" placeholder="Email"
-          value={email} onChange={(e) => setEmail(e.target.value)} />
+          value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" autoCorrect="off" inputMode="email" />
         <input className="w-full border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm" placeholder="Password" type="password"
           value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         <button onClick={submit} disabled={busy}
@@ -101,10 +146,10 @@ function Pending({ profile }) {
 // =====================================================================
 function Dashboard({ profile }) {
   const isAdmin = profile.role === "super_admin";
-  const [screen, setScreen] = useState("board");       // board | new | coordinators
+  const [screen, setScreen] = useState("board");
   const [board, setBoard] = useState({ accounts: [], paidMap: {}, riskMap: {} });
   const [coordMap, setCoordMap] = useState({});
-  const [coordFilter, setCoordFilter] = useState(null); // super admin
+  const [coordFilter, setCoordFilter] = useState(null);
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const [detailId, setDetailId] = useState(null);
@@ -162,7 +207,6 @@ function Dashboard({ profile }) {
 
   return (
     <div className="pb-20">
-      {/* top bar */}
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
           <div className="mr-auto"><Brand /></div>
@@ -176,7 +220,7 @@ function Dashboard({ profile }) {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6">
-        {screen === "coordinators" && <Coordinators onChange={loadCoords} coordMap={coordMap} />}
+        {screen === "coordinators" && <Coordinators onChange={loadCoords} />}
 
         {screen === "new" && (
           <NewApplication profile={profile} onDone={(name) => { setScreen("board"); loadBoard(); flash(`Application sent · contract emailed to ${name}`); }} />
@@ -191,7 +235,6 @@ function Dashboard({ profile }) {
               </p>
             </div>
 
-            {/* stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
               <Stat k="Collected" v={`${money(stats.collected)}`} sub="JMD" tone="text-brandblue" />
               <Stat k="Outstanding" v={`${money(stats.outstanding)}`} sub="JMD" tone="text-slate-900" />
@@ -199,7 +242,6 @@ function Dashboard({ profile }) {
               <Stat k="Need attention" v={stats.risk} tone="text-amber-600" />
             </div>
 
-            {/* super-admin coordinator summary */}
             {isAdmin && (
               <div className="mt-6">
                 <h2 className="text-base font-bold mb-3">Per-coordinator summary</h2>
@@ -233,10 +275,10 @@ function Dashboard({ profile }) {
               </div>
             )}
 
-            {/* controls */}
             <div className="sticky top-[60px] z-10 pt-5 pb-3 mt-2" style={{ background: "linear-gradient(#F8FAFC 74%,transparent)" }}>
               <div className="relative mb-3">
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by CE ID or name…"
+                  autoCapitalize="none" autoCorrect="off"
                   className="w-full bg-white border border-slate-200 rounded-2xl text-[15px] px-4 py-3.5 focus:outline-none focus:border-brandblue focus:ring-2 focus:ring-blue-100" />
               </div>
               <div className="flex gap-2.5 flex-wrap">
@@ -253,8 +295,7 @@ function Dashboard({ profile }) {
               </div>
             </div>
 
-            {/* cards */}
-            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))" }}>
+            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,320px),1fr))" }}>
               {visible.length ? visible.map((a) => (
                 <Card key={a.id} a={a} paid={board.paidMap[a.id] || 0} st={statusOf(a)} isAdmin={isAdmin}
                   coord={coordMap[a.coordinator_id]} onOpen={() => setDetailId(a.id)} />
@@ -272,23 +313,10 @@ function Dashboard({ profile }) {
         <AccountDetail id={detailId} profile={profile} onClose={() => setDetailId(null)}
           onChange={() => { loadBoard(); }} flash={flash} />
       )}
-      {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg z-50">{toast}</div>}
+      {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg z-50 text-center max-w-[90vw]">{toast}</div>}
     </div>
   );
 }
-
-const NavBtn = ({ on, children, ...p }) => (
-  <button {...p} className={`text-[13px] font-semibold px-4 py-2 rounded-lg ${on ? "bg-brandblue text-white" : "text-slate-500"}`}>{children}</button>
-);
-const Stat = ({ k, v, sub, tone }) => (
-  <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-    <div className="text-xs text-slate-500 font-medium">{k}</div>
-    <div className={`text-[22px] font-extrabold mt-1.5 tabular-nums ${tone}`}>{v} {sub && <span className="text-xs text-slate-400 font-semibold">{sub}</span>}</div>
-  </div>
-);
-const Row = ({ l, v, warn }) => (
-  <div className="flex justify-between text-[13px] text-slate-500 mt-2.5"><span>{l}</span><b className={`tabular-nums ${warn ? "text-amber-600" : "text-slate-900"}`}>{v}</b></div>
-);
 
 // ---------- CARD ----------
 function Card({ a, paid, st, isAdmin, coord, onOpen }) {
@@ -340,7 +368,7 @@ function NewApplication({ profile, onDone }) {
   const [f, setF] = useState({ member_name: "", email: "", university: "UWI Mona", ce_id: "", plan: "Premium", frequency: "Weekly", voluntary_deadline: "" });
   const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
   const price = PLANS[f.plan];
 
   const submit = async () => {
@@ -354,39 +382,34 @@ function NewApplication({ profile, onDone }) {
     catch (e) { setErr(e.message || String(e)); setBusy(false); }
   };
 
-  const Field = ({ label, children }) => (
-    <label className="block mb-4"><span className="text-[13px] font-semibold text-slate-600">{label}</span>{children}</label>
-  );
-  const inp = "w-full border border-slate-200 rounded-xl px-4 py-3 mt-1.5 text-sm focus:outline-none focus:border-brandblue focus:ring-2 focus:ring-blue-100";
-
   return (
     <div className="max-w-lg mx-auto pt-7">
       <h1 className="text-2xl font-extrabold tracking-tight mb-1">New application</h1>
       <p className="text-slate-500 text-sm mb-6">The member gets an email to sign the agreement. Approve it here once they've signed.</p>
       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6">
         {err && <div className="bg-amber-50 text-amber-700 text-sm rounded-xl p-3 mb-4">{err}</div>}
-        <Field label="Full name"><input className={inp} value={f.member_name} onChange={set("member_name")} /></Field>
-        <Field label="Email"><input className={inp} value={f.email} onChange={set("email")} type="email" /></Field>
+        <Field label="Full name"><input className={INP} value={f.member_name} onChange={set("member_name")} /></Field>
+        <Field label="Email"><input className={INP} value={f.email} onChange={set("email")} type="email" autoCapitalize="none" autoCorrect="off" inputMode="email" /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="University">
-            <select className={inp} value={f.university} onChange={set("university")}><option>UWI Mona</option><option>UTech</option><option>Other</option></select>
+            <select className={INP} value={f.university} onChange={set("university")}><option>UWI Mona</option><option>UTech</option><option>Other</option></select>
           </Field>
-          <Field label="CE ID"><input className={inp} value={f.ce_id} onChange={set("ce_id")} placeholder="CE-0000" /></Field>
+          <Field label="CE ID"><input className={INP} value={f.ce_id} onChange={set("ce_id")} placeholder="CE-0000" autoCapitalize="characters" autoCorrect="off" /></Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Plan">
-            <select className={inp} value={f.plan} onChange={set("plan")}><option>Premium</option><option>Standard</option></select>
+            <select className={INP} value={f.plan} onChange={set("plan")}><option>Premium</option><option>Standard</option></select>
           </Field>
           <Field label="Frequency">
-            <select className={inp} value={f.frequency} onChange={set("frequency")}><option>Weekly</option><option>Monthly</option><option>Adhoc</option></select>
+            <select className={INP} value={f.frequency} onChange={set("frequency")}><option>Weekly</option><option>Monthly</option><option>Adhoc</option></select>
           </Field>
         </div>
-        <div className="bg-slate-50 rounded-xl p-3.5 text-sm text-slate-600 mb-4 flex justify-between">
+        <div className="bg-slate-50 rounded-xl p-3.5 text-sm text-slate-600 mb-4 flex justify-between flex-wrap gap-1">
           <span>Total <b className="text-slate-900">{money(price.total)}</b></span>
           <span>Downpayment to start <b className="text-brandpurple">{money(price.down)}</b></span>
         </div>
         <Field label={`Voluntary deadline (on/before ${ABSOLUTE_DEADLINE})`}>
-          <input className={inp} type="date" max={ABSOLUTE_DEADLINE} value={f.voluntary_deadline} onChange={set("voluntary_deadline")} />
+          <input className={INP} type="date" max={ABSOLUTE_DEADLINE} value={f.voluntary_deadline} onChange={set("voluntary_deadline")} />
         </Field>
         <label className="flex items-start gap-2.5 text-sm text-slate-600 mb-5">
           <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-0.5" />
@@ -401,7 +424,7 @@ function NewApplication({ profile, onDone }) {
 }
 
 // ---------- COORDINATORS (super admin) ----------
-function Coordinators({ onChange, coordMap }) {
+function Coordinators({ onChange }) {
   const [list, setList] = useState([]);
   const load = async () => setList(await api.listCoordinators());
   useEffect(() => { load(); }, []);
@@ -413,14 +436,14 @@ function Coordinators({ onChange, coordMap }) {
       <div className="space-y-3">
         {list.map((c, i) => (
           <div key={c.id} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4 flex items-center gap-3">
-            <span className="w-9 h-9 rounded-lg grid place-items-center text-white font-bold" style={{ background: colorFor(i) }}>{(c.full_name || c.id)[0]}</span>
-            <div className="mr-auto">
-              <div className="font-bold text-[15px]">{c.full_name || "Unnamed coordinator"}</div>
+            <span className="w-9 h-9 rounded-lg grid place-items-center text-white font-bold flex-none" style={{ background: colorFor(i) }}>{(c.full_name || c.id)[0]}</span>
+            <div className="mr-auto min-w-0">
+              <div className="font-bold text-[15px] truncate">{c.full_name || "Unnamed coordinator"}</div>
               <div className="text-[13px] text-slate-500">{c.approved ? "Approved" : "Awaiting approval"}</div>
             </div>
             {c.approved
-              ? <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full">Active</span>
-              : <button onClick={() => approve(c.id)} className="text-sm font-bold text-white bg-brandblue hover:bg-brandpurple px-4 py-2 rounded-xl transition">Approve</button>}
+              ? <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full flex-none">Active</span>
+              : <button onClick={() => approve(c.id)} className="text-sm font-bold text-white bg-brandblue hover:bg-brandpurple px-4 py-2 rounded-xl transition flex-none">Approve</button>}
           </div>
         ))}
         {!list.length && <p className="text-slate-500 text-sm">No coordinators yet.</p>}
@@ -464,13 +487,6 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
     await api.logAdhoc(a, adhocAmt, path, profile.id); setAdhocAmt(""); setFile(null);
   }, "Adhoc payment logged");
 
-  const FileRow = () => (
-    <label className="flex items-center gap-2 text-[13px] text-slate-500 cursor-pointer">
-      <span className="px-3 py-2 rounded-lg border border-slate-200 font-semibold">{file ? "Receipt attached" : "Attach receipt"}</span>
-      <input type="file" className="hidden" onChange={(e) => setFile(e.target.files[0])} accept="image/*,application/pdf" />
-    </label>
-  );
-
   return (
     <Overlay onClose={onClose}>
       <div className="flex items-start justify-between gap-3 mb-4">
@@ -478,7 +494,7 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
           <div className="text-[22px] font-extrabold tracking-tight">{a.member_name}</div>
           <div className="text-[13px] text-slate-500 mt-1">{a.ce_id} · {a.university} · {a.plan} · {a.frequency}</div>
         </div>
-        <button onClick={onClose} className="text-slate-400 text-2xl leading-none">×</button>
+        <button onClick={onClose} className="text-slate-400 text-2xl leading-none flex-none">×</button>
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-5">
@@ -487,7 +503,6 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
         <MiniStat k="Remaining" v={money(remaining)} tone="text-brandpurple" />
       </div>
 
-      {/* lifecycle actions */}
       {a.status === "awaiting_signature" && (
         <ActionBox title="Contract sent — waiting on signature"
           note="The signable link was emailed to the member. Once they've signed, mark it here.">
@@ -502,11 +517,10 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
       {a.status === "approved" && (
         <ActionBox title={`Confirm downpayment of ${money(a.downpayment)}`}
           note="Confirming starts the plan, builds the payment schedule, and emails the member their terms + group chat link.">
-          <div className="flex items-center gap-3 flex-wrap"><FileRow /><PrimaryBtn busy={busy} onClick={doDownpayment}>Confirm downpayment</PrimaryBtn></div>
+          <div className="flex items-center gap-3 flex-wrap"><FileRow file={file} setFile={setFile} /><PrimaryBtn busy={busy} onClick={doDownpayment}>Confirm downpayment</PrimaryBtn></div>
         </ActionBox>
       )}
 
-      {/* active plan: schedule */}
       {(a.status === "active" || a.status === "completed") && a.frequency !== "Adhoc" && (
         <div className="mb-2">
           <h3 className="font-bold text-[15px] mb-2">Payment schedule</h3>
@@ -523,23 +537,22 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
                   </div>
                   <div className="font-extrabold tabular-nums text-sm">{money(inst.amount)}</div>
                   {inst.status !== "paid" && a.status === "active" && (
-                    <button disabled={busy} onClick={() => doInstallment(inst)} className="text-xs font-bold text-white bg-brandblue hover:bg-brandpurple px-3 py-2 rounded-lg transition">Confirm</button>
+                    <button disabled={busy} onClick={() => doInstallment(inst)} className="text-xs font-bold text-white bg-brandblue hover:bg-brandpurple px-3 py-2 rounded-lg transition flex-none">Confirm</button>
                   )}
                 </div>
               );
             })}
           </div>
-          {a.status === "active" && <div className="mt-3"><FileRow /><p className="text-[12px] text-slate-400 mt-1">Attach a receipt before confirming a payment (optional).</p></div>}
+          {a.status === "active" && <div className="mt-3"><FileRow file={file} setFile={setFile} /><p className="text-[12px] text-slate-400 mt-1">Attach a receipt before confirming a payment (optional).</p></div>}
         </div>
       )}
 
-      {/* adhoc */}
       {a.status === "active" && a.frequency === "Adhoc" && (
         <ActionBox title="Adhoc plan — log a payment" note={`Closes automatically when ${money(a.total)} is reached.`}>
           <div className="flex items-center gap-3 flex-wrap">
-            <input value={adhocAmt} onChange={(e) => setAdhocAmt(e.target.value)} type="number" placeholder="Amount (JMD)"
+            <input value={adhocAmt} onChange={(e) => setAdhocAmt(e.target.value)} type="number" inputMode="numeric" placeholder="Amount (JMD)"
               className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm w-40" />
-            <FileRow />
+            <FileRow file={file} setFile={setFile} />
             <PrimaryBtn busy={busy} onClick={doAdhoc}>Log payment</PrimaryBtn>
           </div>
         </ActionBox>
@@ -549,7 +562,6 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
         <div className="bg-blue-50 text-blue-700 rounded-xl p-4 text-sm font-semibold mt-2">Plan paid in full · membership activation email sent to admin.</div>
       )}
 
-      {/* payment history */}
       {bundle.payments.length > 0 && (
         <div className="mt-6">
           <h3 className="font-bold text-[15px] mb-2">Payments</h3>
@@ -571,34 +583,9 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
 }
 
 function ReceiptLink({ path }) {
-  const [url, setUrl] = useState(null);
   const open = async () => {
     const { data } = await supabase.storage.from("receipts").createSignedUrl(path, 60);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
   };
   return <button onClick={open} className="text-brandblue font-semibold">Receipt</button>;
 }
-
-const Overlay = ({ children, onClose }) => (
-  <div className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
-    <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-      {children}
-    </div>
-  </div>
-);
-const MiniStat = ({ k, v, tone }) => (
-  <div className="bg-slate-50 rounded-xl p-3">
-    <div className="text-[11px] text-slate-500 font-medium">{k}</div>
-    <div className={`text-[15px] font-extrabold tabular-nums mt-0.5 ${tone || "text-slate-900"}`}>{v}</div>
-  </div>
-);
-const ActionBox = ({ title, note, children }) => (
-  <div className="border border-slate-200 rounded-2xl p-4 mb-4">
-    <div className="font-bold text-[15px] mb-1">{title}</div>
-    <p className="text-[13px] text-slate-500 mb-3">{note}</p>
-    {children}
-  </div>
-);
-const PrimaryBtn = ({ busy, children, ...p }) => (
-  <button {...p} disabled={busy} className="py-2.5 px-4 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? "Working…" : children}</button>
-);
