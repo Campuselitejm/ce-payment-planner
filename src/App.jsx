@@ -35,10 +35,15 @@ const Field = ({ label, children }) => (
 );
 const INP = "w-full border border-slate-200 rounded-xl px-4 py-3 mt-1.5 text-sm focus:outline-none focus:border-brandblue focus:ring-2 focus:ring-blue-100";
 const FileRow = ({ file, setFile, required }) => (
-  <label className="flex items-center gap-2 text-[13px] text-slate-500 cursor-pointer">
+  <label className="flex items-center gap-2 text-[13px] text-slate-500 cursor-pointer flex-wrap">
     <span className={`px-3 py-2 rounded-lg border font-semibold ${required && !file ? "border-amber-300 text-amber-700 bg-amber-50" : "border-slate-200"}`}>
       {file ? "Receipt attached" : required ? "Attach receipt (required)" : "Attach receipt (recommended)"}
     </span>
+    {file && (
+      <span className="text-[11px] text-slate-400">
+        {(file.size / 1048576).toFixed(1)} MB{file.size > 400 * 1024 && file.type?.startsWith("image/") ? " · will be compressed" : ""}
+      </span>
+    )}
     <input type="file" className="hidden" onChange={(e) => setFile(e.target.files[0])} accept="image/*,application/pdf" />
   </label>
 );
@@ -392,8 +397,8 @@ function Card({ a, paid, isAdmin, coord, onOpen }) {
 function NewApplication({ profile, onDone }) {
   const [f, setF] = useState({ member_name: "", email: "", whatsapp: "", university: "UWI Mona", ce_id: "", plan: "Premium", deposit_date: todayISO(), deposit_method: "NCB Bank", deadline: "" });
   const [receipt, setReceipt] = useState(null);
-  const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const [stage, setStage] = useState("");
   const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
   const price = PLANS[f.plan];
   const deadlines = availableDeadlines();
@@ -403,10 +408,15 @@ function NewApplication({ profile, onDone }) {
     if (!f.member_name || !f.email || !f.ce_id) return setErr("Name, email and CE ID are required.");
     if (!f.deadline) return setErr("Pick a deadline.");
     if (!receipt) return setErr("The deposit receipt is required to start a plan.");
-    if (!terms) return setErr("Confirm the member agrees to the terms.");
     setBusy(true);
-    try { await api.createApplication({ ...f, deposit_receipt: receipt }, profile.id); onDone(f.member_name); }
-    catch (e) { setErr(e.message || String(e)); setBusy(false); }
+    try {
+      await api.createApplication({ ...f, deposit_receipt: receipt }, profile.id, setStage);
+      onDone(f.member_name);
+    } catch (e) {
+      setErr(e.message || String(e));
+      setStage("");
+      setBusy(false);
+    }
   };
 
   return (
@@ -444,13 +454,9 @@ function NewApplication({ profile, onDone }) {
             {deadlines.map((d) => <option key={d.date} value={d.date}>{d.label}</option>)}
           </select>
         </Field>
-        <p className="text-[12px] text-slate-400 -mt-3 mb-4">Hard ceiling: {HARD_DEADLINE}. Unpaid balances past this date roll over to Varsity Invitational.</p>
+        <p className="text-[12px] text-slate-400 -mt-3 mb-5">Hard ceiling: {HARD_DEADLINE}. Unpaid balances past this date roll over to Varsity Invitational.</p>
 
-        <label className="flex items-start gap-2.5 text-sm text-slate-600 mb-5">
-          <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-0.5" />
-          Member agrees to the Campus Elite payment plan terms of agreement.
-        </label>
-        <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? "Sending…" : "Create plan"}</button>
+        <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? (stage || "Sending…") : "Create plan"}</button>
       </div>
     </div>
   );
