@@ -1,5 +1,14 @@
 import { supabase } from "./supabaseClient.js";
 import { PLANS, PREMIUM_COUPONS, STANDARD_COUPONS } from "./lib.js";
+import { compressImage } from "./compress.js";
+
+// ---- error helper: turn network junk into something a coordinator understands ----
+function netMsg(e, fallback = "Something went wrong. Please try again.") {
+  const m = (e && (e.message || e.error_description)) || String(e || "");
+  if (/load failed|failed to fetch|network|timeout|aborted/i.test(m))
+    return "The connection dropped before this finished. Nothing was saved — check your signal and try again.";
+  return m || fallback;
+}
 
 // ---- profile / auth ----
 export async function getProfile() {
@@ -23,7 +32,7 @@ async function notify(type, account_id) {
 // ---- accounts ----
 export async function listAccounts() {
   const { data, error } = await supabase.from("accounts").select("*").order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) throw new Error(netMsg(error));
   return data || [];
 }
 
@@ -35,9 +44,37 @@ export async function getAccountBundle(id) {
   return { account, payments: payments || [] };
 }
 
-// ---- create application: deposit + receipt captured at creation ----
-export async function createApplication(f, coordinatorId) {
+// ---- receipts: compress, sanitise, upload with one retry ----
+export async function uploadReceipt(coordinatorId, file) {
+  const prepared = await compressImage(file);
+
+  if (prepared.size > 8 * 1024 * 1024)
+    throw new Error("That file is too large to upload. Try a screenshot or a smaller photo.");
+
+  const safe = (prepared.name || "receipt").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60);
+  const path = `${coordinatorId}/${crypto.randomUUID()}-${safe}`;
+
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { error } = await supabase.storage.from("receipts").upload(path, prepared, {
+      contentType: prepared.type || "application/octet-stream",
+      upsert: true,
+    });
+    if (!error) return path;
+    lastErr = error;
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 900));
+  }
+  throw new Error(netMsg(lastErr, "The receipt didn't upload."));
+}
+
+// ---- create application: receipt uploads FIRST, so a drop saves nothing at all ----
+export async function createApplication(f, coordinatorId, onStage = () => {}) {
   const price = PLANS[f.plan];
+
+  onStage("Uploading receipt…");
+  const receiptPath = await uploadReceipt(coordinatorId, f.deposit_receipt);
+
+  onStage("Creating plan…");
   const { data: account, error } = await supabase.from("accounts").insert({
     coordinator_id: coordinatorId,
     member_name: f.member_name, email: f.email, whatsapp: f.whatsapp || null,
@@ -46,43 +83,43 @@ export async function createApplication(f, coordinatorId) {
     deadline: f.deadline,
     status: "awaiting_signature",
   }).select().single();
-  if (error) throw error;
+  if (error) throw new Error(netMsg(error));
 
-  const receiptPath = await uploadReceipt(coordinatorId, account.id, f.deposit_receipt);
-  await supabase.from("payments").insert({
+  onStage("Recording deposit…");
+  const { error: payErr } = await supabase.from("payments").insert({
     account_id: account.id, kind: "deposit", amount: price.down,
     method: f.deposit_method, paid_on: f.deposit_date, receipt_url: receiptPath,
     created_by: coordinatorId,
   });
+  if (payErr) {
+    // roll back rather than leave a plan with no deposit against it
+    await supabase.from("accounts").delete().eq("id", account.id);
+    throw new Error(netMsg(payErr, "The deposit couldn't be recorded. Nothing was saved."));
+  }
 
+  onStage("Sending terms…");
   await notify("contract", account.id);
   return account;
 }
 
 // ---- mark signed → straight to active ----
 export async function markSigned(account) {
-  await supabase.from("accounts")
+  const { error } = await supabase.from("accounts")
     .update({ status: "active", signed_at: new Date().toISOString() }).eq("id", account.id);
+  if (error) throw new Error(netMsg(error));
   await notify("plan_start", account.id);
 }
 
-// ---- receipts ----
-export async function uploadReceipt(coordinatorId, accountId, file) {
-  const path = `${coordinatorId}/${accountId}/${Date.now()}-${file.name}`;
-  const { error } = await supabase.storage.from("receipts").upload(path, file);
-  if (error) throw error;
-  return path;
-}
-
-// ---- log a payment (deposit or later) → recalc → complete if balance cleared ----
+// ---- log a payment → recalc → complete if balance cleared ----
 export async function logPayment(account, { amount, method, paid_on, file }, coordinatorId) {
   let receiptPath = null;
-  if (file) receiptPath = await uploadReceipt(coordinatorId, account.id, file);
+  if (file) receiptPath = await uploadReceipt(coordinatorId, file);
 
-  await supabase.from("payments").insert({
+  const { error: insErr } = await supabase.from("payments").insert({
     account_id: account.id, kind: "payment", amount: Number(amount),
     method, paid_on, receipt_url: receiptPath, created_by: coordinatorId,
   });
+  if (insErr) throw new Error(netMsg(insErr, "The payment couldn't be saved."));
 
   const { data: pays } = await supabase.from("payments").select("amount").eq("account_id", account.id);
   const paid = (pays || []).reduce((s, p) => s + p.amount, 0);
