@@ -44,6 +44,22 @@ export async function getAccountBundle(id) {
   return { account, payments: payments || [] };
 }
 
+// ---- shared: total verified against an account ----
+async function paidTotal(accountId) {
+  const { data } = await supabase.from("payments").select("amount").eq("account_id", accountId);
+  return (data || []).reduce((s, p) => s + p.amount, 0);
+}
+
+// ---- shared: close out a fully-paid plan ----
+async function completeAccount(account) {
+  const coupon = await assignCoupon(account.plan);
+  await supabase.from("accounts")
+    .update({ status: "completed", completed_at: new Date().toISOString(), coupon_code: coupon })
+    .eq("id", account.id);
+  await notify("complete", account.id);
+  await notify("admin_activate", account.id);
+}
+
 // ---- receipts: compress, sanitise, upload with one retry ----
 export async function uploadReceipt(coordinatorId, file) {
   const prepared = await compressImage(file);
@@ -70,6 +86,12 @@ export async function uploadReceipt(coordinatorId, file) {
 // ---- create application: receipt uploads FIRST, so a drop saves nothing at all ----
 export async function createApplication(f, coordinatorId, onStage = () => {}) {
   const price = PLANS[f.plan];
+  const opening = Number(f.deposit_amount);
+
+  if (!opening || opening < price.down)
+    throw new Error(`The opening payment must be at least the required deposit.`);
+  if (opening > price.total)
+    throw new Error(`That's more than the plan total.`);
 
   onStage("Uploading receipt…");
   const receiptPath = await uploadReceipt(coordinatorId, f.deposit_receipt);
@@ -79,7 +101,7 @@ export async function createApplication(f, coordinatorId, onStage = () => {}) {
     coordinator_id: coordinatorId,
     member_name: f.member_name, email: f.email, whatsapp: f.whatsapp || null,
     university: f.university, ce_id: f.ce_id,
-    plan: f.plan, total: price.total, downpayment: price.down,
+    plan: f.plan, total: price.total, downpayment: opening,
     deadline: f.deadline,
     status: "awaiting_signature",
   }).select().single();
@@ -87,7 +109,7 @@ export async function createApplication(f, coordinatorId, onStage = () => {}) {
 
   onStage("Recording deposit…");
   const { error: payErr } = await supabase.from("payments").insert({
-    account_id: account.id, kind: "deposit", amount: price.down,
+    account_id: account.id, kind: "deposit", amount: opening,
     method: f.deposit_method, paid_on: f.deposit_date, receipt_url: receiptPath,
     created_by: coordinatorId,
   });
@@ -102,12 +124,15 @@ export async function createApplication(f, coordinatorId, onStage = () => {}) {
   return account;
 }
 
-// ---- mark signed → straight to active ----
+// ---- mark signed → active, or straight to completed if already paid in full ----
 export async function markSigned(account) {
   const { error } = await supabase.from("accounts")
     .update({ status: "active", signed_at: new Date().toISOString() }).eq("id", account.id);
   if (error) throw new Error(netMsg(error));
-  await notify("plan_start", account.id);
+
+  const paid = await paidTotal(account.id);
+  if (paid >= account.total) await completeAccount(account);
+  else await notify("plan_start", account.id);
 }
 
 // ---- log a payment → recalc → complete if balance cleared ----
@@ -121,19 +146,9 @@ export async function logPayment(account, { amount, method, paid_on, file }, coo
   });
   if (insErr) throw new Error(netMsg(insErr, "The payment couldn't be saved."));
 
-  const { data: pays } = await supabase.from("payments").select("amount").eq("account_id", account.id);
-  const paid = (pays || []).reduce((s, p) => s + p.amount, 0);
-
-  if (paid >= account.total) {
-    const coupon = await assignCoupon(account.plan);
-    await supabase.from("accounts")
-      .update({ status: "completed", completed_at: new Date().toISOString(), coupon_code: coupon })
-      .eq("id", account.id);
-    await notify("complete", account.id);
-    await notify("admin_activate", account.id);
-  } else {
-    await notify("payment_logged", account.id);
-  }
+  const paid = await paidTotal(account.id);
+  if (paid >= account.total) await completeAccount(account);
+  else await notify("payment_logged", account.id);
 }
 
 async function assignCoupon(plan) {
