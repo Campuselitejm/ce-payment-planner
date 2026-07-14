@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { PLANS, buildSchedule } from "./lib.js";
+import { PLANS, PREMIUM_COUPONS, STANDARD_COUPONS } from "./lib.js";
 
 // ---- profile / auth ----
 export async function getProfile() {
@@ -9,13 +9,18 @@ export async function getProfile() {
   return data ? { ...data, email: user.email } : null;
 }
 
+export async function changeOwnPassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 // ---- email trigger ----
 async function notify(type, account_id) {
   try { await supabase.functions.invoke("notify", { body: { action: "send", type, account_id } }); }
-  catch (e) { console.warn("notify failed", type, e); } // don't block the UI on email failure
+  catch (e) { console.warn("notify failed", type, e); }
 }
 
-// ---- accounts (RLS scopes them automatically) ----
+// ---- accounts ----
 export async function listAccounts() {
   const { data, error } = await supabase.from("accounts").select("*").order("created_at", { ascending: false });
   if (error) throw error;
@@ -23,59 +28,45 @@ export async function listAccounts() {
 }
 
 export async function getAccountBundle(id) {
-  const [{ data: account }, { data: installments }, { data: payments }] = await Promise.all([
+  const [{ data: account }, { data: payments }] = await Promise.all([
     supabase.from("accounts").select("*").eq("id", id).single(),
-    supabase.from("installments").select("*").eq("account_id", id).order("seq"),
     supabase.from("payments").select("*").eq("account_id", id).order("created_at"),
   ]);
-  return { account, installments: installments || [], payments: payments || [] };
+  return { account, payments: payments || [] };
 }
 
-// ---- create application (status: awaiting_signature) + send contract email ----
+// ---- create application: deposit + receipt captured at creation ----
 export async function createApplication(f, coordinatorId) {
   const price = PLANS[f.plan];
-  const { data, error } = await supabase.from("accounts").insert({
+  const { data: account, error } = await supabase.from("accounts").insert({
     coordinator_id: coordinatorId,
-    member_name: f.member_name, email: f.email, university: f.university, ce_id: f.ce_id,
+    member_name: f.member_name, email: f.email, whatsapp: f.whatsapp || null,
+    university: f.university, ce_id: f.ce_id,
     plan: f.plan, total: price.total, downpayment: price.down,
-    frequency: f.frequency, voluntary_deadline: f.voluntary_deadline,
+    deadline: f.deadline,
     status: "awaiting_signature",
   }).select().single();
   if (error) throw error;
-  await notify("contract", data.id);
-  return data;
-}
 
-// ---- lifecycle transitions ----
-export async function markSigned(id) {
-  const { error } = await supabase.from("accounts")
-    .update({ status: "signed", signed_at: new Date().toISOString() }).eq("id", id);
-  if (error) throw error;
-}
-
-export async function approveApplication(id) {
-  const { error } = await supabase.from("accounts")
-    .update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", id);
-  if (error) throw error;
-}
-
-// ---- confirm downpayment → generate schedule → activate → plan_start email ----
-export async function confirmDownpayment(account, receiptUrl, coordinatorId) {
-  const start = new Date().toISOString().slice(0, 10);
+  const receiptPath = await uploadReceipt(coordinatorId, account.id, f.deposit_receipt);
   await supabase.from("payments").insert({
-    account_id: account.id, kind: "downpayment", amount: account.downpayment,
-    receipt_url: receiptUrl || null, created_by: coordinatorId,
+    account_id: account.id, kind: "deposit", amount: price.down,
+    method: f.deposit_method, paid_on: f.deposit_date, receipt_url: receiptPath,
+    created_by: coordinatorId,
   });
-  const remaining = account.total - account.downpayment;
-  const schedule = buildSchedule(start, account.voluntary_deadline, account.frequency, remaining);
-  if (schedule.length) {
-    await supabase.from("installments").insert(schedule.map((s) => ({ ...s, account_id: account.id })));
-  }
-  await supabase.from("accounts").update({ status: "active", start_date: start }).eq("id", account.id);
+
+  await notify("contract", account.id);
+  return account;
+}
+
+// ---- mark signed → straight to active ----
+export async function markSigned(account) {
+  await supabase.from("accounts")
+    .update({ status: "active", signed_at: new Date().toISOString() }).eq("id", account.id);
   await notify("plan_start", account.id);
 }
 
-// ---- upload a receipt to Storage, return public-ish signed path ----
+// ---- receipts ----
 export async function uploadReceipt(coordinatorId, accountId, file) {
   const path = `${coordinatorId}/${accountId}/${Date.now()}-${file.name}`;
   const { error } = await supabase.storage.from("receipts").upload(path, file);
@@ -83,36 +74,36 @@ export async function uploadReceipt(coordinatorId, accountId, file) {
   return path;
 }
 
-// ---- confirm an installment payment (with optional receipt) ----
-export async function confirmInstallment(account, installment, receiptPath, coordinatorId) {
-  await supabase.from("payments").insert({
-    account_id: account.id, installment_id: installment.id, kind: "installment",
-    amount: installment.amount, receipt_url: receiptPath || null, created_by: coordinatorId,
-  });
-  await supabase.from("installments").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", installment.id);
-  await maybeComplete(account.id);
-}
+// ---- log a payment (deposit or later) → recalc → complete if balance cleared ----
+export async function logPayment(account, { amount, method, paid_on, file }, coordinatorId) {
+  let receiptPath = null;
+  if (file) receiptPath = await uploadReceipt(coordinatorId, account.id, file);
 
-// ---- log an adhoc payment ----
-export async function logAdhoc(account, amount, receiptPath, coordinatorId) {
   await supabase.from("payments").insert({
-    account_id: account.id, kind: "adhoc", amount: Number(amount),
-    receipt_url: receiptPath || null, created_by: coordinatorId,
+    account_id: account.id, kind: "payment", amount: Number(amount),
+    method, paid_on, receipt_url: receiptPath, created_by: coordinatorId,
   });
-  await maybeComplete(account.id);
-}
 
-// ---- completion check: total reached → completed + emails ----
-async function maybeComplete(accountId) {
-  const { data: account } = await supabase.from("accounts").select("*").eq("id", accountId).single();
-  const { data: pays } = await supabase.from("payments").select("amount").eq("account_id", accountId);
+  const { data: pays } = await supabase.from("payments").select("amount").eq("account_id", account.id);
   const paid = (pays || []).reduce((s, p) => s + p.amount, 0);
-  if (account && account.status !== "completed" && paid >= account.total) {
+
+  if (paid >= account.total) {
+    const coupon = await assignCoupon(account.plan);
     await supabase.from("accounts")
-      .update({ status: "completed", at_risk: false, completed_at: new Date().toISOString() }).eq("id", accountId);
-    await notify("complete", accountId);
-    await notify("admin_activate", accountId);
+      .update({ status: "completed", completed_at: new Date().toISOString(), coupon_code: coupon })
+      .eq("id", account.id);
+    await notify("complete", account.id);
+    await notify("admin_activate", account.id);
+  } else {
+    await notify("payment_logged", account.id);
   }
+}
+
+async function assignCoupon(plan) {
+  const list = plan === "Premium" ? PREMIUM_COUPONS : STANDARD_COUPONS;
+  const { data: used } = await supabase.from("accounts").select("coupon_code").eq("plan", plan).not("coupon_code", "is", null);
+  const usedSet = new Set((used || []).map((u) => u.coupon_code));
+  return list.find((c) => !usedSet.has(c)) || list[Math.floor(Math.random() * list.length)];
 }
 
 // ---- super admin: coordinators ----
@@ -122,5 +113,13 @@ export async function listCoordinators() {
 }
 export async function approveCoordinator(id) {
   const { error } = await supabase.from("profiles").update({ approved: true }).eq("id", id);
+  if (error) throw error;
+}
+export async function updateCoordinatorName(id, full_name) {
+  const { error } = await supabase.from("profiles").update({ full_name }).eq("id", id);
+  if (error) throw error;
+}
+export async function sendCoordinatorPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
   if (error) throw error;
 }
