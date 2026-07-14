@@ -6,7 +6,7 @@ export async function compressImage(file, {
   maxBytes = 400 * 1024,
 } = {}) {
   try {
-    if (!file || !file.type?.startsWith("image/")) return file;
+    if (!file || !file.type?.startsWith("image/")) return file; // PDFs pass through
     if (file.size <= maxBytes) return file;
 
     const bitmap = await createImageBitmap(file);
@@ -21,14 +21,11 @@ export async function compressImage(file, {
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, width, height);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
     bitmap.close?.();
 
     let q = quality;
     let blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", q));
-
-    // Step quality down until it fits, but never below 0.4
     while (blob && blob.size > maxBytes && q > 0.4) {
       q -= 0.1;
       blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", q));
