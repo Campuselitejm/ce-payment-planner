@@ -1,23 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient.js";
-import { PLANS, ABSOLUTE_DEADLINE, money, STATUS } from "./lib.js";
+import { PLANS, availableDeadlines, HARD_DEADLINE, PAYMENT_METHODS, money, daysLeft, waLink, STATUS } from "./lib.js";
 import * as api from "./api.js";
 
 const COORD_COLORS = ["#2563EB", "#7C3AED", "#F5B400", "#1D4ED8", "#0EA5E9", "#DB2777"];
 const colorFor = (i) => COORD_COLORS[i % COORD_COLORS.length];
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 // ---------- shared bits ----------
-const Center = ({ children }) => (
-  <div className="min-h-screen grid place-items-center px-4">{children}</div>
-);
-const Spinner = () => (
-  <div className="w-8 h-8 border-2 border-slate-200 border-t-brandblue rounded-full animate-spin" />
-);
+const Center = ({ children }) => <div className="min-h-screen grid place-items-center px-4">{children}</div>;
+const Spinner = () => <div className="w-8 h-8 border-2 border-slate-200 border-t-brandblue rounded-full animate-spin" />;
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="w-9 h-9 rounded-xl grid place-items-center text-white font-extrabold"
-        style={{ background: "linear-gradient(140deg,#2563EB,#7C3AED)" }}>CE</div>
+      <div className="w-9 h-9 rounded-xl grid place-items-center text-white font-extrabold" style={{ background: "linear-gradient(140deg,#2563EB,#7C3AED)" }}>CE</div>
       <div className="leading-tight">
         <div className="font-bold text-[15px]">Payment Plans</div>
         <div className="text-[11px] tracking-wider uppercase text-slate-400">Varsity SZN 6</div>
@@ -34,16 +30,15 @@ const Stat = ({ k, v, sub, tone }) => (
     <div className={`text-[22px] font-extrabold mt-1.5 tabular-nums ${tone}`}>{v} {sub && <span className="text-xs text-slate-400 font-semibold">{sub}</span>}</div>
   </div>
 );
-const Row = ({ l, v, warn }) => (
-  <div className="flex justify-between text-[13px] text-slate-500 mt-2.5"><span>{l}</span><b className={`tabular-nums ${warn ? "text-amber-600" : "text-slate-900"}`}>{v}</b></div>
-);
 const Field = ({ label, children }) => (
   <label className="block mb-4"><span className="text-[13px] font-semibold text-slate-600">{label}</span>{children}</label>
 );
 const INP = "w-full border border-slate-200 rounded-xl px-4 py-3 mt-1.5 text-sm focus:outline-none focus:border-brandblue focus:ring-2 focus:ring-blue-100";
-const FileRow = ({ file, setFile }) => (
+const FileRow = ({ file, setFile, required }) => (
   <label className="flex items-center gap-2 text-[13px] text-slate-500 cursor-pointer">
-    <span className="px-3 py-2 rounded-lg border border-slate-200 font-semibold">{file ? "Receipt attached" : "Attach receipt"}</span>
+    <span className={`px-3 py-2 rounded-lg border font-semibold ${required && !file ? "border-amber-300 text-amber-700 bg-amber-50" : "border-slate-200"}`}>
+      {file ? "Receipt attached" : required ? "Attach receipt (required)" : "Attach receipt (recommended)"}
+    </span>
     <input type="file" className="hidden" onChange={(e) => setFile(e.target.files[0])} accept="image/*,application/pdf" />
   </label>
 );
@@ -65,11 +60,19 @@ const PrimaryBtn = ({ busy, children, ...p }) => (
 );
 const Overlay = ({ children, onClose }) => (
   <div className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
-    <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-      {children}
-    </div>
+    <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>{children}</div>
   </div>
 );
+function WaButton({ number }) {
+  const link = waLink(number);
+  if (!link) return <span className="text-xs text-slate-300 font-semibold">No WhatsApp</span>;
+  return (
+    <button onClick={(e) => { e.stopPropagation(); window.open(link, "_blank"); }}
+      className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-full hover:bg-emerald-100 transition">
+      WhatsApp
+    </button>
+  );
+}
 
 // =====================================================================
 export default function App() {
@@ -113,20 +116,14 @@ function Login() {
         <h1 className="text-xl font-extrabold text-center mb-1">Sign in</h1>
         <p className="text-slate-500 text-sm text-center mb-5">Coordinator & super-admin access</p>
         {err && <div className="bg-amber-50 text-amber-700 text-sm rounded-xl p-3 mb-3">{err}</div>}
-        <input className="w-full border border-slate-200 rounded-xl px-4 py-3 mb-3 text-sm" placeholder="Email"
-          value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" autoCorrect="off" inputMode="email" />
-        <input className="w-full border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm" placeholder="Password" type="password"
-          value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-        <button onClick={submit} disabled={busy}
-          className="w-full py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
+        <input className="w-full border border-slate-200 rounded-xl px-4 py-3 mb-3 text-sm" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" autoCorrect="off" inputMode="email" />
+        <input className="w-full border border-slate-200 rounded-xl px-4 py-3 mb-4 text-sm" placeholder="Password" type="password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+        <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? "Signing in…" : "Sign in"}</button>
       </div>
     </Center>
   );
 }
 
-// ---------- PENDING APPROVAL ----------
 function Pending({ profile }) {
   return (
     <Center>
@@ -147,7 +144,8 @@ function Pending({ profile }) {
 function Dashboard({ profile }) {
   const isAdmin = profile.role === "super_admin";
   const [screen, setScreen] = useState("board");
-  const [board, setBoard] = useState({ accounts: [], paidMap: {}, riskMap: {} });
+  const [view, setView] = useState("cards");
+  const [board, setBoard] = useState({ accounts: [], paidMap: {} });
   const [coordMap, setCoordMap] = useState({});
   const [coordFilter, setCoordFilter] = useState(null);
   const [filter, setFilter] = useState("all");
@@ -158,15 +156,12 @@ function Dashboard({ profile }) {
   async function loadBoard() {
     const accounts = await api.listAccounts();
     const ids = accounts.map((a) => a.id);
-    const paidMap = {}, riskMap = {};
+    const paidMap = {};
     if (ids.length) {
       const { data: pays } = await supabase.from("payments").select("account_id,amount").in("account_id", ids);
       (pays || []).forEach((p) => { paidMap[p.account_id] = (paidMap[p.account_id] || 0) + p.amount; });
-      const today = new Date().toISOString().slice(0, 10);
-      const { data: insts } = await supabase.from("installments").select("account_id,status,due_date").in("account_id", ids);
-      (insts || []).forEach((i) => { if (i.status === "missed" || (i.status === "pending" && i.due_date < today)) riskMap[i.account_id] = true; });
     }
-    setBoard({ accounts, paidMap, riskMap });
+    setBoard({ accounts, paidMap });
   }
   async function loadCoords() {
     if (!isAdmin) return;
@@ -178,18 +173,10 @@ function Dashboard({ profile }) {
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 3200); };
 
-  function statusOf(a) {
-    if (a.status === "completed") return "done";
-    if (a.status === "awaiting_signature") return "await";
-    if (a.status === "signed") return "signed";
-    if (a.status === "approved") return "pending";
-    return board.riskMap[a.id] || a.at_risk ? "risk" : "active";
-  }
-
   const visible = useMemo(() => {
     let s = board.accounts;
     if (isAdmin && coordFilter) s = s.filter((a) => a.coordinator_id === coordFilter);
-    if (filter !== "all") s = s.filter((a) => statusOf(a) === filter);
+    if (filter !== "all") s = s.filter((a) => a.status === filter);
     if (q) { const t = q.toLowerCase(); s = s.filter((a) => (a.ce_id + " " + a.member_name).toLowerCase().includes(t)); }
     return s;
   }, [board, filter, q, coordFilter]);
@@ -198,48 +185,53 @@ function Dashboard({ profile }) {
     const set = isAdmin && coordFilter ? board.accounts.filter((a) => a.coordinator_id === coordFilter) : board.accounts;
     const collected = set.reduce((s, a) => s + (board.paidMap[a.id] || 0), 0);
     const outstanding = set.reduce((s, a) => s + (a.total - (board.paidMap[a.id] || 0)), 0);
-    const active = set.filter((a) => statusOf(a) === "active").length;
-    const risk = set.filter((a) => statusOf(a) === "risk").length;
-    return { collected, outstanding, active, risk };
+    const active = set.filter((a) => a.status === "active").length;
+    const invitational = set.filter((a) => a.status === "invitational").length;
+    return { collected, outstanding, active, invitational };
   }, [board, coordFilter]);
 
-  const FILTERS = [["all", "All"], ["active", "On track"], ["risk", "Attention"], ["await", "Awaiting"], ["done", "Complete"]];
+  const FILTERS = [["all", "All"], ["active", "Active"], ["awaiting_signature", "Awaiting"], ["completed", "Complete"], ["invitational", "Invitational"]];
 
   return (
     <div className="pb-20">
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
           <div className="mr-auto"><Brand /></div>
           <nav className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
             <NavBtn on={screen === "board"} onClick={() => setScreen("board")}>Accounts</NavBtn>
             {!isAdmin && <NavBtn on={screen === "new"} onClick={() => setScreen("new")}>+ New</NavBtn>}
             {isAdmin && <NavBtn on={screen === "coordinators"} onClick={() => setScreen("coordinators")}>Coordinators</NavBtn>}
+            <NavBtn on={screen === "account"} onClick={() => setScreen("account")}>Account</NavBtn>
           </nav>
           <button onClick={() => supabase.auth.signOut()} className="text-[13px] font-semibold text-slate-500 px-2">Sign out</button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6">
-        {screen === "coordinators" && <Coordinators onChange={loadCoords} />}
-
+      <main className="max-w-6xl mx-auto px-4 sm:px-6">
+        {screen === "account" && <MyAccount profile={profile} flash={flash} />}
+        {screen === "coordinators" && <Coordinators onChange={loadCoords} flash={flash} />}
         {screen === "new" && (
-          <NewApplication profile={profile} onDone={(name) => { setScreen("board"); loadBoard(); flash(`Application sent · contract emailed to ${name}`); }} />
+          <NewApplication profile={profile} onDone={(name) => { setScreen("board"); loadBoard(); flash(`Application sent · terms & sign link emailed to ${name}`); }} />
         )}
 
         {screen === "board" && (
           <>
-            <div className="pt-7 pb-1">
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">{isAdmin ? "All accounts" : "My accounts"}</h1>
-              <p className="text-slate-500 text-sm mt-1.5">
-                {isAdmin ? "Every account across all coordinators. Tap a coordinator to focus." : "Every member you've enrolled and where their plan stands."}
-              </p>
+            <div className="pt-7 pb-1 flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">{isAdmin ? "All accounts" : "My accounts"}</h1>
+                <p className="text-slate-500 text-sm mt-1.5">{isAdmin ? "Every account across all coordinators." : "Every member you've enrolled and where their plan stands."}</p>
+              </div>
+              <div className="inline-flex bg-slate-100 rounded-xl p-1">
+                <NavBtn on={view === "cards"} onClick={() => setView("cards")}>Cards</NavBtn>
+                <NavBtn on={view === "table"} onClick={() => setView("table")}>Table</NavBtn>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
-              <Stat k="Collected" v={`${money(stats.collected)}`} sub="JMD" tone="text-brandblue" />
-              <Stat k="Outstanding" v={`${money(stats.outstanding)}`} sub="JMD" tone="text-slate-900" />
+              <Stat k="Collected" v={money(stats.collected)} sub="JMD" tone="text-brandblue" />
+              <Stat k="Outstanding" v={money(stats.outstanding)} sub="JMD" tone="text-slate-900" />
               <Stat k="Active plans" v={stats.active} tone="text-brandpurple" />
-              <Stat k="Need attention" v={stats.risk} tone="text-amber-600" />
+              <Stat k="Invitational" v={stats.invitational} tone="text-amber-600" />
             </div>
 
             {isAdmin && (
@@ -250,7 +242,6 @@ function Dashboard({ profile }) {
                     const set = board.accounts.filter((a) => a.coordinator_id === c.id);
                     const col = set.reduce((s, a) => s + (board.paidMap[a.id] || 0), 0);
                     const tgt = set.reduce((s, a) => s + a.total, 0);
-                    const risk = set.filter((a) => statusOf(a) === "risk").length;
                     const pct = tgt ? Math.round((col / tgt) * 100) : 0;
                     const on = coordFilter === c.id;
                     return (
@@ -260,13 +251,9 @@ function Dashboard({ profile }) {
                           <span className="w-7 h-7 rounded-lg grid place-items-center text-white text-[13px]" style={{ background: c.color }}>{(c.full_name || "?")[0]}</span>
                           {c.full_name || "Unnamed"}
                         </div>
-                        <Row l="Accounts" v={set.length} />
-                        <Row l="Collected" v={money(col)} />
-                        <Row l="Need attention" v={risk} warn={risk > 0} />
-                        <div className="h-1.5 rounded-full bg-slate-100 mt-3 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#2563EB,#7C3AED)" }} />
-                        </div>
-                        <Row l="Toward target" v={`${pct}%`} />
+                        <div className="flex justify-between text-[13px] text-slate-500 mt-2.5"><span>Accounts</span><b className="text-slate-900">{set.length}</b></div>
+                        <div className="flex justify-between text-[13px] text-slate-500 mt-2"><span>Collected</span><b className="text-slate-900">{money(col)}</b></div>
+                        <div className="h-1.5 rounded-full bg-slate-100 mt-3 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#2563EB,#7C3AED)" }} /></div>
                       </button>
                     );
                   })}
@@ -277,17 +264,15 @@ function Dashboard({ profile }) {
 
             <div className="sticky top-[60px] z-10 pt-5 pb-3 mt-2" style={{ background: "linear-gradient(#F8FAFC 74%,transparent)" }}>
               <div className="relative mb-3">
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by CE ID or name…"
-                  autoCapitalize="none" autoCorrect="off"
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by CE ID or name…" autoCapitalize="none" autoCorrect="off"
                   className="w-full bg-white border border-slate-200 rounded-2xl text-[15px] px-4 py-3.5 focus:outline-none focus:border-brandblue focus:ring-2 focus:ring-blue-100" />
               </div>
               <div className="flex gap-2.5 flex-wrap">
                 {FILTERS.map(([k, l]) => {
-                  const n = k === "all" ? visible.length : board.accounts.filter((a) => statusOf(a) === k).length;
+                  const n = k === "all" ? visible.length : board.accounts.filter((a) => a.status === k).length;
                   const on = filter === k;
                   return (
-                    <button key={k} onClick={() => setFilter(k)}
-                      className={`text-[13.5px] font-semibold px-4 py-2 rounded-full border transition ${on ? "bg-brandblue text-white border-brandblue" : "bg-white text-slate-500 border-slate-200 hover:border-brandblue hover:text-brandblue"}`}>
+                    <button key={k} onClick={() => setFilter(k)} className={`text-[13.5px] font-semibold px-4 py-2 rounded-full border transition ${on ? "bg-brandblue text-white border-brandblue" : "bg-white text-slate-500 border-slate-200 hover:border-brandblue hover:text-brandblue"}`}>
                       {l}<span className="text-xs ml-1.5 opacity-70">{n}</span>
                     </button>
                   );
@@ -295,63 +280,103 @@ function Dashboard({ profile }) {
               </div>
             </div>
 
-            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,320px),1fr))" }}>
-              {visible.length ? visible.map((a) => (
-                <Card key={a.id} a={a} paid={board.paidMap[a.id] || 0} st={statusOf(a)} isAdmin={isAdmin}
-                  coord={coordMap[a.coordinator_id]} onOpen={() => setDetailId(a.id)} />
-              )) : (
-                <div className="col-span-full text-center py-16 bg-white border border-dashed border-slate-200 rounded-2xl text-slate-500">
-                  <b className="block text-lg text-slate-900 mb-1.5">No accounts match</b>Try another CE ID or clear the filter.
-                </div>
-              )}
-            </div>
+            {view === "cards" ? (
+              <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,320px),1fr))" }}>
+                {visible.length ? visible.map((a) => (
+                  <Card key={a.id} a={a} paid={board.paidMap[a.id] || 0} isAdmin={isAdmin} coord={coordMap[a.coordinator_id]} onOpen={() => setDetailId(a.id)} />
+                )) : <Empty />}
+              </div>
+            ) : (
+              <TableView rows={visible} paidMap={board.paidMap} isAdmin={isAdmin} coordMap={coordMap} onOpen={setDetailId} />
+            )}
           </>
         )}
       </main>
 
-      {detailId && (
-        <AccountDetail id={detailId} profile={profile} onClose={() => setDetailId(null)}
-          onChange={() => { loadBoard(); }} flash={flash} />
-      )}
+      {detailId && <AccountDetail id={detailId} profile={profile} onClose={() => setDetailId(null)} onChange={loadBoard} flash={flash} />}
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg z-50 text-center max-w-[90vw]">{toast}</div>}
     </div>
   );
 }
 
-// ---------- CARD ----------
-function Card({ a, paid, st, isAdmin, coord, onOpen }) {
-  const S = STATUS[st];
-  const remaining = a.total - paid;
-  const pct = Math.round((paid / a.total) * 100);
-  const cta = st === "await" ? "Mark as signed" : st === "signed" ? "Approve application"
-    : st === "pending" ? "Confirm downpayment" : st === "done" ? "View summary" : "Manage plan";
-  const line = st === "done" ? ["Settled", "Membership activation queued"]
-    : st === "await" ? ["Waiting", "Member to sign contract"]
-    : st === "signed" ? ["Ready", "Approve to continue"]
-    : st === "pending" ? ["To start", "Confirm downpayment"]
-    : st === "risk" ? ["Attention", "Payment missed · recalculated"]
-    : ["Progress", `${pct}% paid`];
+const Empty = () => (
+  <div className="col-span-full text-center py-16 bg-white border border-dashed border-slate-200 rounded-2xl text-slate-500">
+    <b className="block text-lg text-slate-900 mb-1.5">No accounts match</b>Try another CE ID or clear the filter.
+  </div>
+);
+
+// ---------- TABLE VIEW ----------
+function TableView({ rows, paidMap, isAdmin, coordMap, onOpen }) {
+  if (!rows.length) return <Empty />;
   return (
-    <article onClick={onOpen} className="rise bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-lg transition cursor-pointer">
+    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-x-auto">
+      <table className="w-full text-sm min-w-[820px]">
+        <thead>
+          <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
+            <th className="px-4 py-3">Name</th>
+            <th className="px-4 py-3">University</th>
+            <th className="px-4 py-3">Plan</th>
+            <th className="px-4 py-3">Deposit</th>
+            <th className="px-4 py-3">Deadline</th>
+            <th className="px-4 py-3">Balance due</th>
+            <th className="px-4 py-3">Status</th>
+            {isAdmin && <th className="px-4 py-3">Coordinator</th>}
+            <th className="px-4 py-3">Contact</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a) => {
+            const paid = paidMap[a.id] || 0;
+            const S = STATUS[a.status];
+            const coord = coordMap[a.coordinator_id];
+            return (
+              <tr key={a.id} onClick={() => onOpen(a.id)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+                <td className="px-4 py-3 font-semibold whitespace-nowrap">{a.member_name}</td>
+                <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{a.university}</td>
+                <td className="px-4 py-3 whitespace-nowrap">{a.plan}</td>
+                <td className="px-4 py-3 tabular-nums whitespace-nowrap">{money(a.downpayment)}</td>
+                <td className="px-4 py-3 whitespace-nowrap">{a.deadline}</td>
+                <td className="px-4 py-3 font-bold tabular-nums whitespace-nowrap">{money(a.total - paid)}</td>
+                <td className="px-4 py-3 whitespace-nowrap"><span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${S.pill}`}><span className={`w-1.5 h-1.5 rounded-full ${S.dot}`} />{S.label}</span></td>
+                {isAdmin && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{coord?.full_name || "—"}</td>}
+                <td className="px-4 py-3 whitespace-nowrap"><WaButton number={a.whatsapp} /></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------- CARD ----------
+function Card({ a, paid, isAdmin, coord, onOpen }) {
+  const S = STATUS[a.status];
+  const remaining = a.total - paid;
+  const cta = a.status === "awaiting_signature" ? "Mark as signed" : a.status === "active" ? "Log payment" : a.status === "completed" ? "View summary" : "View details";
+  const dleft = daysLeft(a.deadline);
+  return (
+    <article onClick={onOpen} className={`rise bg-white border border-slate-100 border-l-4 ${S.edge} rounded-2xl p-5 shadow-sm hover:shadow-lg transition cursor-pointer`}>
       <div className="flex items-center justify-between gap-2.5 mb-3.5">
         <span className="text-xs font-bold text-slate-500">{a.plan} <span className="text-slate-400 font-medium">· {money(a.total)}</span></span>
         <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-full ${S.pill}`}><span className={`w-1.5 h-1.5 rounded-full ${S.dot}`} />{S.label}</span>
       </div>
-      <div className="text-[21px] font-bold tracking-tight leading-tight">{a.member_name}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[21px] font-bold tracking-tight leading-tight">{a.member_name}</div>
+        <WaButton number={a.whatsapp} />
+      </div>
       <div className="flex items-center gap-2.5 mt-2.5 flex-wrap">
         <span className="text-xs font-bold text-brandpurple bg-violet-50 px-2.5 py-1 rounded-lg" style={{ fontFamily: "ui-monospace,monospace" }}>{a.ce_id}</span>
-        <span className="text-[13px] text-slate-500">{a.university} · {a.frequency}</span>
+        <span className="text-[13px] text-slate-500">{a.university}</span>
       </div>
       <div className="flex items-baseline justify-between gap-2.5 my-4">
         <span className="text-[26px] font-extrabold tabular-nums tracking-tight"><span className="text-sm text-slate-400 font-semibold">$</span>{remaining.toLocaleString("en-US")}</span>
         <span className="text-[12.5px] text-slate-500 text-right">remaining<br />of {money(a.total)} · paid <b className="text-brandblue">{money(paid)}</b></span>
       </div>
-      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-        <div className="h-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#2563EB,#7C3AED)" }} />
-      </div>
-      <div className="flex items-center gap-2.5 mt-4 text-[13.5px]">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{line[0]}</span>
-        <b className={st === "risk" ? "text-amber-700" : "text-slate-900"}>{line[1]}</b>
+      <div className="flex items-center gap-2.5 text-[13.5px]">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Deadline</span>
+        <b className="text-slate-900">{a.deadline}</b>
+        {a.status === "active" && <span className="text-slate-400">· {dleft}d left</span>}
       </div>
       <button className="w-full mt-4 py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition">{cta}</button>
       {isAdmin && coord && (
@@ -365,88 +390,138 @@ function Card({ a, paid, st, isAdmin, coord, onOpen }) {
 
 // ---------- NEW APPLICATION ----------
 function NewApplication({ profile, onDone }) {
-  const [f, setF] = useState({ member_name: "", email: "", university: "UWI Mona", ce_id: "", plan: "Premium", frequency: "Weekly", voluntary_deadline: "" });
+  const [f, setF] = useState({ member_name: "", email: "", whatsapp: "", university: "UWI Mona", ce_id: "", plan: "Premium", deposit_date: todayISO(), deposit_method: "NCB Bank", deadline: "" });
+  const [receipt, setReceipt] = useState(null);
   const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
   const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
   const price = PLANS[f.plan];
+  const deadlines = availableDeadlines();
 
   const submit = async () => {
     setErr("");
     if (!f.member_name || !f.email || !f.ce_id) return setErr("Name, email and CE ID are required.");
-    if (!f.voluntary_deadline) return setErr("Pick a voluntary deadline.");
-    if (f.voluntary_deadline > ABSOLUTE_DEADLINE) return setErr(`Deadline can't be after ${ABSOLUTE_DEADLINE}.`);
+    if (!f.deadline) return setErr("Pick a deadline.");
+    if (!receipt) return setErr("The deposit receipt is required to start a plan.");
     if (!terms) return setErr("Confirm the member agrees to the terms.");
     setBusy(true);
-    try { await api.createApplication(f, profile.id); onDone(f.member_name); }
+    try { await api.createApplication({ ...f, deposit_receipt: receipt }, profile.id); onDone(f.member_name); }
     catch (e) { setErr(e.message || String(e)); setBusy(false); }
   };
 
   return (
     <div className="max-w-lg mx-auto pt-7">
       <h1 className="text-2xl font-extrabold tracking-tight mb-1">New application</h1>
-      <p className="text-slate-500 text-sm mb-6">The member gets an email to sign the agreement. Approve it here once they've signed.</p>
+      <p className="text-slate-500 text-sm mb-6">Capture the deposit receipt and pick a deadline. The member gets their terms + sign link by email.</p>
       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6">
         {err && <div className="bg-amber-50 text-amber-700 text-sm rounded-xl p-3 mb-4">{err}</div>}
         <Field label="Full name"><input className={INP} value={f.member_name} onChange={set("member_name")} /></Field>
         <Field label="Email"><input className={INP} value={f.email} onChange={set("email")} type="email" autoCapitalize="none" autoCorrect="off" inputMode="email" /></Field>
+        <Field label="WhatsApp number"><input className={INP} value={f.whatsapp} onChange={set("whatsapp")} placeholder="876 555 0123" inputMode="tel" /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="University">
-            <select className={INP} value={f.university} onChange={set("university")}><option>UWI Mona</option><option>UTech</option><option>Other</option></select>
-          </Field>
+          <Field label="University"><select className={INP} value={f.university} onChange={set("university")}><option>UWI Mona</option><option>UTech</option><option>Other</option></select></Field>
           <Field label="CE ID"><input className={INP} value={f.ce_id} onChange={set("ce_id")} placeholder="CE-0000" autoCapitalize="characters" autoCorrect="off" /></Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Plan">
-            <select className={INP} value={f.plan} onChange={set("plan")}><option>Premium</option><option>Standard</option></select>
-          </Field>
-          <Field label="Frequency">
-            <select className={INP} value={f.frequency} onChange={set("frequency")}><option>Weekly</option><option>Monthly</option><option>Adhoc</option></select>
-          </Field>
-        </div>
+        <Field label="Plan"><select className={INP} value={f.plan} onChange={set("plan")}><option>Premium</option><option>Standard</option></select></Field>
         <div className="bg-slate-50 rounded-xl p-3.5 text-sm text-slate-600 mb-4 flex justify-between flex-wrap gap-1">
           <span>Total <b className="text-slate-900">{money(price.total)}</b></span>
-          <span>Downpayment to start <b className="text-brandpurple">{money(price.down)}</b></span>
+          <span>Deposit required <b className="text-brandpurple">{money(price.down)}</b></span>
         </div>
-        <Field label={`Voluntary deadline (on/before ${ABSOLUTE_DEADLINE})`}>
-          <input className={INP} type="date" max={ABSOLUTE_DEADLINE} value={f.voluntary_deadline} onChange={set("voluntary_deadline")} />
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Deposit date"><input className={INP} type="date" max={todayISO()} value={f.deposit_date} onChange={set("deposit_date")} /></Field>
+          <Field label="Deposit method">
+            <select className={INP} value={f.deposit_method} onChange={set("deposit_method")}>
+              <option>NCB Bank</option><option>Other Bank</option><option>Online</option><option>Zelle</option><option>PayPal</option><option>Cash</option>
+            </select>
+          </Field>
+        </div>
+        <div className="mb-4"><FileRow file={receipt} setFile={setReceipt} required /></div>
+
+        <Field label="Deadline">
+          <select className={INP} value={f.deadline} onChange={set("deadline")}>
+            <option value="">Select a deadline…</option>
+            {deadlines.map((d) => <option key={d.date} value={d.date}>{d.label}</option>)}
+          </select>
         </Field>
+        <p className="text-[12px] text-slate-400 -mt-3 mb-4">Hard ceiling: {HARD_DEADLINE}. Unpaid balances past this date roll over to Varsity Invitational.</p>
+
         <label className="flex items-start gap-2.5 text-sm text-slate-600 mb-5">
           <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-0.5" />
           Member agrees to the Campus Elite payment plan terms of agreement.
         </label>
-        <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">
-          {busy ? "Sending…" : "Send application"}
-        </button>
+        <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? "Sending…" : "Create plan"}</button>
       </div>
     </div>
   );
 }
 
 // ---------- COORDINATORS (super admin) ----------
-function Coordinators({ onChange }) {
+function Coordinators({ onChange, flash }) {
   const [list, setList] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [name, setName] = useState("");
   const load = async () => setList(await api.listCoordinators());
   useEffect(() => { load(); }, []);
   const approve = async (id) => { await api.approveCoordinator(id); await load(); onChange && onChange(); };
+  const saveName = async (id) => { await api.updateCoordinatorName(id, name); setEditing(null); await load(); onChange && onChange(); };
+  const resetPw = async (email) => { try { await api.sendCoordinatorPasswordReset(email); flash(`Password reset email sent to ${email}`); } catch (e) { flash(e.message || String(e)); } };
+
   return (
     <div className="max-w-2xl mx-auto pt-7">
       <h1 className="text-2xl font-extrabold tracking-tight mb-1">Coordinators</h1>
-      <p className="text-slate-500 text-sm mb-6">Approve a coordinator to unlock their account on first login.</p>
+      <p className="text-slate-500 text-sm mb-6">Approve first logins, rename coordinators, or send a password reset.</p>
       <div className="space-y-3">
         {list.map((c, i) => (
-          <div key={c.id} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4 flex items-center gap-3">
-            <span className="w-9 h-9 rounded-lg grid place-items-center text-white font-bold flex-none" style={{ background: colorFor(i) }}>{(c.full_name || c.id)[0]}</span>
-            <div className="mr-auto min-w-0">
-              <div className="font-bold text-[15px] truncate">{c.full_name || "Unnamed coordinator"}</div>
-              <div className="text-[13px] text-slate-500">{c.approved ? "Approved" : "Awaiting approval"}</div>
+          <div key={c.id} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4">
+            <div className="flex items-center gap-3">
+              <span className="w-9 h-9 rounded-lg grid place-items-center text-white font-bold flex-none" style={{ background: colorFor(i) }}>{(c.full_name || c.email || "?")[0]}</span>
+              <div className="mr-auto min-w-0">
+                {editing === c.id ? (
+                  <div className="flex items-center gap-2">
+                    <input className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm w-40" value={name} onChange={(e) => setName(e.target.value)} />
+                    <button onClick={() => saveName(c.id)} className="text-xs font-bold text-white bg-brandblue px-3 py-1.5 rounded-lg">Save</button>
+                  </div>
+                ) : (
+                  <div className="font-bold text-[15px] truncate">{c.full_name || "Unnamed coordinator"}</div>
+                )}
+                <div className="text-[13px] text-slate-500 truncate">{c.email} · {c.approved ? "Approved" : "Awaiting approval"}</div>
+              </div>
+              {c.approved
+                ? <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full flex-none">Active</span>
+                : <button onClick={() => approve(c.id)} className="text-sm font-bold text-white bg-brandblue hover:bg-brandpurple px-4 py-2 rounded-xl transition flex-none">Approve</button>}
             </div>
-            {c.approved
-              ? <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full flex-none">Active</span>
-              : <button onClick={() => approve(c.id)} className="text-sm font-bold text-white bg-brandblue hover:bg-brandpurple px-4 py-2 rounded-xl transition flex-none">Approve</button>}
+            {c.approved && editing !== c.id && (
+              <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
+                <button onClick={() => { setEditing(c.id); setName(c.full_name || ""); }} className="text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">Edit name</button>
+                <button onClick={() => resetPw(c.email)} className="text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg">Send password reset</button>
+              </div>
+            )}
           </div>
         ))}
         {!list.length && <p className="text-slate-500 text-sm">No coordinators yet.</p>}
+      </div>
+    </div>
+  );
+}
+
+// ---------- MY ACCOUNT (self password change) ----------
+function MyAccount({ profile, flash }) {
+  const [pw, setPw] = useState(""); const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (pw.length < 6) return flash("Password must be at least 6 characters.");
+    setBusy(true);
+    try { await api.changeOwnPassword(pw); setPw(""); flash("Password updated."); }
+    catch (e) { flash(e.message || String(e)); }
+    setBusy(false);
+  };
+  return (
+    <div className="max-w-md mx-auto pt-7">
+      <h1 className="text-2xl font-extrabold tracking-tight mb-1">Account</h1>
+      <p className="text-slate-500 text-sm mb-6">{profile.full_name || profile.email} · {profile.role === "super_admin" ? "Super admin" : "Coordinator"}</p>
+      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6">
+        <Field label="New password"><input className={INP} type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="At least 6 characters" /></Field>
+        <PrimaryBtn busy={busy} onClick={save}>Update password</PrimaryBtn>
       </div>
     </div>
   );
@@ -457,42 +532,33 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
   const [bundle, setBundle] = useState(null);
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState(null);
-  const [adhocAmt, setAdhocAmt] = useState("");
+  const [amt, setAmt] = useState(""); const [method, setMethod] = useState("NCB Bank"); const [paidOn, setPaidOn] = useState(todayISO());
 
   const load = async () => setBundle(await api.getAccountBundle(id));
   useEffect(() => { load(); }, [id]);
 
-  if (!bundle || !bundle.account) return (
-    <Overlay onClose={onClose}><div className="grid place-items-center py-16"><Spinner /></div></Overlay>
-  );
+  if (!bundle || !bundle.account) return <Overlay onClose={onClose}><div className="grid place-items-center py-16"><Spinner /></div></Overlay>;
   const a = bundle.account;
   const paid = bundle.payments.reduce((s, p) => s + p.amount, 0);
   const remaining = a.total - paid;
+  const S = STATUS[a.status];
 
   const wrap = async (fn, msg) => { setBusy(true); try { await fn(); await load(); onChange(); msg && flash(msg); } catch (e) { flash(e.message || String(e)); } setBusy(false); };
 
-  const doDownpayment = () => wrap(async () => {
-    let path = null; if (file) path = await api.uploadReceipt(a.coordinator_id, a.id, file);
-    await api.confirmDownpayment(a, path, profile.id); setFile(null);
-  }, "Plan activated · start email sent");
-
-  const doInstallment = (inst) => wrap(async () => {
-    let path = null; if (file) path = await api.uploadReceipt(a.coordinator_id, a.id, file);
-    await api.confirmInstallment(a, inst, path, profile.id); setFile(null);
-  }, "Payment confirmed");
-
-  const doAdhoc = () => wrap(async () => {
-    if (!adhocAmt) throw new Error("Enter an amount");
-    let path = null; if (file) path = await api.uploadReceipt(a.coordinator_id, a.id, file);
-    await api.logAdhoc(a, adhocAmt, path, profile.id); setAdhocAmt(""); setFile(null);
-  }, "Adhoc payment logged");
+  const doSign = () => wrap(() => api.markSigned(a), "Marked as signed · plan is now active");
+  const doPayment = () => wrap(async () => {
+    if (!amt || Number(amt) <= 0) throw new Error("Enter a valid amount");
+    await api.logPayment(a, { amount: amt, method, paid_on: paidOn, file }, profile.id);
+    setAmt(""); setFile(null); setPaidOn(todayISO());
+  }, "Payment logged");
 
   return (
     <Overlay onClose={onClose}>
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <div className="text-[22px] font-extrabold tracking-tight">{a.member_name}</div>
-          <div className="text-[13px] text-slate-500 mt-1">{a.ce_id} · {a.university} · {a.plan} · {a.frequency}</div>
+          <div className="text-[13px] text-slate-500 mt-1">{a.ce_id} · {a.university} · {a.plan}</div>
+          <div className="mt-2 flex items-center gap-2"><WaButton number={a.whatsapp} /><span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${S.pill}`}><span className={`w-1.5 h-1.5 rounded-full ${S.dot}`} />{S.label}</span></div>
         </div>
         <button onClick={onClose} className="text-slate-400 text-2xl leading-none flex-none">×</button>
       </div>
@@ -502,64 +568,39 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
         <MiniStat k="Paid" v={money(paid)} tone="text-brandblue" />
         <MiniStat k="Remaining" v={money(remaining)} tone="text-brandpurple" />
       </div>
+      <div className="text-[13px] text-slate-500 mb-5">Deadline: <b className="text-slate-900">{a.deadline}</b>{a.status === "active" && ` · ${daysLeft(a.deadline)} days left`}</div>
 
       {a.status === "awaiting_signature" && (
-        <ActionBox title="Contract sent — waiting on signature"
-          note="The signable link was emailed to the member. Once they've signed, mark it here.">
-          <PrimaryBtn busy={busy} onClick={() => wrap(() => api.markSigned(a.id), "Marked as signed")}>Mark as signed</PrimaryBtn>
-        </ActionBox>
-      )}
-      {a.status === "signed" && (
-        <ActionBox title="Signed — approve to continue" note="Approving moves this to downpayment confirmation.">
-          <PrimaryBtn busy={busy} onClick={() => wrap(() => api.approveApplication(a.id), "Application approved")}>Approve application</PrimaryBtn>
-        </ActionBox>
-      )}
-      {a.status === "approved" && (
-        <ActionBox title={`Confirm downpayment of ${money(a.downpayment)}`}
-          note="Confirming starts the plan, builds the payment schedule, and emails the member their terms + group chat link.">
-          <div className="flex items-center gap-3 flex-wrap"><FileRow file={file} setFile={setFile} /><PrimaryBtn busy={busy} onClick={doDownpayment}>Confirm downpayment</PrimaryBtn></div>
+        <ActionBox title="Deposit received — waiting on signature" note="The terms & sign link were emailed to the member. Once JotForm notifies you they've signed, mark it here to activate the plan.">
+          <PrimaryBtn busy={busy} onClick={doSign}>Mark as signed</PrimaryBtn>
         </ActionBox>
       )}
 
-      {(a.status === "active" || a.status === "completed") && a.frequency !== "Adhoc" && (
-        <div className="mb-2">
-          <h3 className="font-bold text-[15px] mb-2">Payment schedule</h3>
-          <div className="space-y-2">
-            {bundle.installments.map((inst) => {
-              const overdue = inst.status === "pending" && inst.due_date < new Date().toISOString().slice(0, 10);
-              return (
-                <div key={inst.id} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3.5 py-3">
-                  <div className="mr-auto">
-                    <div className="text-sm font-semibold">{inst.due_date} <span className="text-slate-400 font-normal">· #{inst.seq}</span></div>
-                    <div className={`text-[12px] font-semibold ${inst.status === "paid" ? "text-blue-600" : overdue || inst.status === "missed" ? "text-amber-600" : "text-slate-400"}`}>
-                      {inst.status === "paid" ? "Paid" : inst.status === "missed" ? "Missed" : overdue ? "Overdue" : "Upcoming"}
-                    </div>
-                  </div>
-                  <div className="font-extrabold tabular-nums text-sm">{money(inst.amount)}</div>
-                  {inst.status !== "paid" && a.status === "active" && (
-                    <button disabled={busy} onClick={() => doInstallment(inst)} className="text-xs font-bold text-white bg-brandblue hover:bg-brandpurple px-3 py-2 rounded-lg transition flex-none">Confirm</button>
-                  )}
-                </div>
-              );
-            })}
+      {a.status === "active" && (
+        <ActionBox title="Log a payment" note="Enter the payment details from the receipt the member sent, then confirm to update the balance.">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <input value={amt} onChange={(e) => setAmt(e.target.value)} type="number" inputMode="numeric" placeholder="Amount (JMD)" className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
+              {PAYMENT_METHODS.map((m) => <option key={m}>{m}</option>)}
+            </select>
           </div>
-          {a.status === "active" && <div className="mt-3"><FileRow file={file} setFile={setFile} /><p className="text-[12px] text-slate-400 mt-1">Attach a receipt before confirming a payment (optional).</p></div>}
-        </div>
-      )}
-
-      {a.status === "active" && a.frequency === "Adhoc" && (
-        <ActionBox title="Adhoc plan — log a payment" note={`Closes automatically when ${money(a.total)} is reached.`}>
-          <div className="flex items-center gap-3 flex-wrap">
-            <input value={adhocAmt} onChange={(e) => setAdhocAmt(e.target.value)} type="number" inputMode="numeric" placeholder="Amount (JMD)"
-              className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm w-40" />
-            <FileRow file={file} setFile={setFile} />
-            <PrimaryBtn busy={busy} onClick={doAdhoc}>Log payment</PrimaryBtn>
-          </div>
+          <input value={paidOn} onChange={(e) => setPaidOn(e.target.value)} type="date" max={todayISO()} className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm mb-3 w-full sm:w-auto" />
+          <div className="flex items-center gap-3 flex-wrap"><FileRow file={file} setFile={setFile} /><PrimaryBtn busy={busy} onClick={doPayment}>Confirm payment</PrimaryBtn></div>
         </ActionBox>
       )}
 
       {a.status === "completed" && (
-        <div className="bg-blue-50 text-blue-700 rounded-xl p-4 text-sm font-semibold mt-2">Plan paid in full · membership activation email sent to admin.</div>
+        <div className="bg-blue-50 text-blue-700 rounded-xl p-4 text-sm font-semibold mt-2 mb-4">
+          Plan paid in full · membership activation email sent to admin.
+          <div className="mt-2 bg-white rounded-lg px-3 py-2 text-slate-900 font-mono text-base tracking-wider inline-block">{a.coupon_code}</div>
+          <p className="text-xs text-blue-600 font-normal mt-1">Hand this code to the member — they enter it at the website to activate their membership.</p>
+        </div>
+      )}
+
+      {a.status === "invitational" && (
+        <div className="bg-amber-50 text-amber-700 rounded-xl p-4 text-sm font-semibold mt-2 mb-4">
+          Deadline passed with a remaining balance · student rolled over to Varsity Invitational.
+        </div>
       )}
 
       {bundle.payments.length > 0 && (
@@ -568,11 +609,8 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
           <div className="space-y-1.5">
             {bundle.payments.map((p) => (
               <div key={p.id} className="flex items-center justify-between text-[13px] text-slate-600 border-b border-slate-100 py-2">
-                <span className="capitalize">{p.kind} · {new Date(p.created_at).toLocaleDateString()}</span>
-                <span className="flex items-center gap-3">
-                  {p.receipt_url && <ReceiptLink path={p.receipt_url} />}
-                  <b className="tabular-nums text-slate-900">{money(p.amount)}</b>
-                </span>
+                <span className="capitalize">{p.kind} · {p.method} · {p.paid_on}</span>
+                <span className="flex items-center gap-3">{p.receipt_url && <ReceiptLink path={p.receipt_url} />}<b className="tabular-nums text-slate-900">{money(p.amount)}</b></span>
               </div>
             ))}
           </div>
