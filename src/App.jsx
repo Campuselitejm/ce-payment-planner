@@ -395,17 +395,30 @@ function Card({ a, paid, isAdmin, coord, onOpen }) {
 
 // ---------- NEW APPLICATION ----------
 function NewApplication({ profile, onDone }) {
-  const [f, setF] = useState({ member_name: "", email: "", whatsapp: "", university: "UWI Mona", ce_id: "", plan: "Premium", deposit_date: todayISO(), deposit_method: "NCB Bank", deadline: "" });
+  const [f, setF] = useState({
+    member_name: "", email: "", whatsapp: "", university: "UWI Mona", ce_id: "",
+    plan: "Premium", deposit_amount: String(PLANS.Premium.down),
+    deposit_date: todayISO(), deposit_method: "NCB Bank", deadline: "",
+  });
   const [receipt, setReceipt] = useState(null);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
   const [stage, setStage] = useState("");
   const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
+  const setPlan = (e) => {
+    const plan = e.target.value;
+    setF((prev) => ({ ...prev, plan, deposit_amount: String(PLANS[plan].down) }));
+  };
   const price = PLANS[f.plan];
   const deadlines = availableDeadlines();
+  const openingNum = Number(f.deposit_amount) || 0;
+  const afterOpening = price.total - openingNum;
+  const paidInFull = openingNum >= price.total;
 
   const submit = async () => {
     setErr("");
     if (!f.member_name || !f.email || !f.ce_id) return setErr("Name, email and CE ID are required.");
+    if (openingNum < price.down) return setErr(`The opening payment must be at least the ${money(price.down)} deposit.`);
+    if (openingNum > price.total) return setErr(`That's more than the ${money(price.total)} plan total.`);
     if (!f.deadline) return setErr("Pick a deadline.");
     if (!receipt) return setErr("The deposit receipt is required to start a plan.");
     setBusy(true);
@@ -432,15 +445,26 @@ function NewApplication({ profile, onDone }) {
           <Field label="University"><select className={INP} value={f.university} onChange={set("university")}><option>UWI Mona</option><option>UTech</option><option>Other</option></select></Field>
           <Field label="CE ID"><input className={INP} value={f.ce_id} onChange={set("ce_id")} placeholder="CE-0000" autoCapitalize="characters" autoCorrect="off" /></Field>
         </div>
-        <Field label="Plan"><select className={INP} value={f.plan} onChange={set("plan")}><option>Premium</option><option>Standard</option></select></Field>
+        <Field label="Plan"><select className={INP} value={f.plan} onChange={setPlan}><option>Premium</option><option>Standard</option></select></Field>
         <div className="bg-slate-50 rounded-xl p-3.5 text-sm text-slate-600 mb-4 flex justify-between flex-wrap gap-1">
           <span>Total <b className="text-slate-900">{money(price.total)}</b></span>
-          <span>Deposit required <b className="text-brandpurple">{money(price.down)}</b></span>
+          <span>Minimum deposit <b className="text-brandpurple">{money(price.down)}</b></span>
         </div>
 
+        <Field label="Amount paid now">
+          <input className={INP} value={f.deposit_amount} onChange={set("deposit_amount")} type="number" inputMode="numeric" placeholder={String(price.down)} />
+        </Field>
+        <p className={`text-[12px] -mt-3 mb-4 ${openingNum && openingNum < price.down ? "text-amber-600" : "text-slate-400"}`}>
+          {openingNum < price.down
+            ? `Must be at least the ${money(price.down)} deposit.`
+            : paidInFull
+              ? "Paid in full — the plan completes as soon as the contract is signed."
+              : `Balance after this payment: ${money(afterOpening)}`}
+        </p>
+
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Deposit date"><input className={INP} type="date" max={todayISO()} value={f.deposit_date} onChange={set("deposit_date")} /></Field>
-          <Field label="Deposit method">
+          <Field label="Payment date"><input className={INP} type="date" max={todayISO()} value={f.deposit_date} onChange={set("deposit_date")} /></Field>
+          <Field label="Payment method">
             <select className={INP} value={f.deposit_method} onChange={set("deposit_method")}>
               <option>NCB Bank</option><option>Other Bank</option><option>Online</option><option>Zelle</option><option>PayPal</option><option>Cash</option>
             </select>
