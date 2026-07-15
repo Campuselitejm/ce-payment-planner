@@ -197,7 +197,13 @@ function Dashboard({ profile }) {
     <div className="pb-20">
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
-          <div className="mr-auto"><Brand /></div>
+          <div className="mr-auto flex items-center gap-3 min-w-0">
+            <Brand />
+            <div className="pl-3 border-l border-slate-200 leading-tight min-w-0">
+              <div className="text-[13px] font-bold truncate max-w-[180px]">{profile.full_name || "Unnamed"}</div>
+              <div className="text-[11px] text-slate-400 truncate max-w-[180px]">{profile.email}</div>
+            </div>
+          </div>
           <nav className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
             <NavBtn on={screen === "board"} onClick={() => setScreen("board")}>Accounts</NavBtn>
             {!isAdmin && <NavBtn on={screen === "new"} onClick={() => setScreen("new")}>+ New</NavBtn>}
@@ -353,7 +359,9 @@ function Card({ a, paid, isAdmin, coord, onOpen }) {
   const S = STATUS[a.status] || STATUS.active;
   const remaining = a.total - paid;
   const cta = a.status === "awaiting_signature" ? "Mark as signed" : a.status === "active" ? "Log payment" : a.status === "completed" ? "View summary" : "View details";
-  const ctaTone = a.status === "awaiting_signature" ? "bg-brandpurple hover:bg-brandblue" : "bg-brandblue hover:bg-brandpurple";
+  const ctaTone = a.status === "awaiting_signature" ? "bg-brandpurple hover:bg-brandblue"
+    : a.status === "completed" ? "bg-emerald-600 hover:bg-emerald-700"
+    : "bg-brandblue hover:bg-brandpurple";
   const dleft = daysLeft(a.deadline);
   return (
     <article onClick={onOpen} className={`rise bg-white border border-slate-100 border-l-4 ${S.edge} rounded-2xl p-5 shadow-sm hover:shadow-lg transition cursor-pointer`}>
@@ -522,7 +530,7 @@ function Coordinators({ onChange, flash }) {
                 <div className="text-[13px] text-slate-500 truncate">{c.email} · {c.approved ? "Approved" : "Awaiting approval"}</div>
               </div>
               {c.approved
-                ? <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full flex-none">Active</span>
+                ? <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full flex-none">Active</span>
                 : <button onClick={() => approve(c.id)} className="text-sm font-bold text-white bg-brandblue hover:bg-brandpurple px-4 py-2 rounded-xl transition flex-none">Approve</button>}
             </div>
             {c.approved && editing !== c.id && (
@@ -621,7 +629,7 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
       )}
 
       {a.status === "completed" && (
-        <div className="bg-blue-50 text-blue-700 rounded-xl p-4 text-sm font-semibold mt-2 mb-4">
+        <div className="bg-emerald-50 text-emerald-800 rounded-xl p-4 text-sm font-semibold mt-2 mb-4">
           Plan paid in full · activation email sent to admin and the code emailed to the member.
           <div className="mt-2 bg-white rounded-lg px-3 py-2 text-slate-900 font-mono text-base tracking-wider inline-block">{a.coupon_code}</div>
         </div>
