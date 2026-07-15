@@ -65,7 +65,7 @@ export function waLink(raw) {
 export const STATUS = {
   awaiting_signature: { label: "Awaiting signature", pill: "bg-violet-50 text-violet-700", dot: "bg-brandpurple", edge: "border-l-brandpurple" },
   active:             { label: "Active",             pill: "bg-blue-50 text-blue-700",     dot: "bg-brandblue",  edge: "border-l-brandblue" },
-  completed:          { label: "Complete",           pill: "bg-brandblue text-white",      dot: "bg-white",      edge: "border-l-brandblue" },
+  completed:          { label: "Complete",           pill: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", edge: "border-l-emerald-500" },
   invitational:       { label: "Rolled to Invitational", pill: "bg-amber-50 text-amber-700", dot: "bg-brandyellow", edge: "border-l-brandyellow" },
   special_case:       { label: "Special case",       pill: "bg-rose-50 text-rose-700",     dot: "bg-rose-500",   edge: "border-l-rose-400" },
 };
