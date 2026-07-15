@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient.js";
-import { PLANS, availableDeadlines, HARD_DEADLINE, PAYMENT_METHODS, money, daysLeft, waLink, STATUS } from "./lib.js";
+import { PLANS, PLAN_KEYS, PARTY_PASS, PARTY_PASS_CAP, availableDeadlines, HARD_DEADLINE, PAYMENT_METHODS, money, daysLeft, waLink, STATUS } from "./lib.js";
 import * as api from "./api.js";
 
 const COORD_COLORS = ["#2563EB", "#7C3AED", "#F5B400", "#1D4ED8", "#0EA5E9", "#DB2777"];
 const colorFor = (i) => COORD_COLORS[i % COORD_COLORS.length];
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-// ---------- shared bits ----------
 const Center = ({ children }) => <div className="min-h-screen grid place-items-center px-4">{children}</div>;
 const Spinner = () => <div className="w-8 h-8 border-2 border-slate-200 border-t-brandblue rounded-full animate-spin" />;
 function Brand() {
@@ -60,8 +59,8 @@ const ActionBox = ({ title, note, children }) => (
     {children}
   </div>
 );
-const PrimaryBtn = ({ busy, children, ...p }) => (
-  <button {...p} disabled={busy} className="py-2.5 px-4 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition disabled:opacity-60">{busy ? "Working…" : children}</button>
+const PrimaryBtn = ({ busy, tone, children, ...p }) => (
+  <button {...p} disabled={busy} className={`py-2.5 px-4 rounded-xl text-white font-bold text-sm transition disabled:opacity-60 ${tone === "purple" ? "bg-brandpurple hover:bg-brandblue" : "bg-brandblue hover:bg-brandpurple"}`}>{busy ? "Working…" : children}</button>
 );
 const Overlay = ({ children, onClose }) => (
   <div className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
@@ -79,7 +78,6 @@ function WaButton({ number }) {
   );
 }
 
-// =====================================================================
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -104,7 +102,6 @@ export default function App() {
   return <Dashboard profile={profile} />;
 }
 
-// ---------- LOGIN ----------
 function Login() {
   const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
@@ -143,9 +140,6 @@ function Pending({ profile }) {
   );
 }
 
-// =====================================================================
-// DASHBOARD
-// =====================================================================
 function Dashboard({ profile }) {
   const isAdmin = profile.role === "super_admin";
   const [screen, setScreen] = useState("board");
@@ -157,6 +151,7 @@ function Dashboard({ profile }) {
   const [q, setQ] = useState("");
   const [detailId, setDetailId] = useState(null);
   const [toast, setToast] = useState("");
+  const [passesLeft, setPassesLeft] = useState(null);
 
   async function loadBoard() {
     const accounts = await api.listAccounts();
@@ -167,6 +162,7 @@ function Dashboard({ profile }) {
       (pays || []).forEach((p) => { paidMap[p.account_id] = (paidMap[p.account_id] || 0) + p.amount; });
     }
     setBoard({ accounts, paidMap });
+    api.partyPassesLeft().then(setPassesLeft).catch(() => {});
   }
   async function loadCoords() {
     if (!isAdmin) return;
@@ -176,7 +172,7 @@ function Dashboard({ profile }) {
   }
   useEffect(() => { loadBoard(); loadCoords(); }, []);
 
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 3200); };
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 4200); };
 
   const visible = useMemo(() => {
     let s = board.accounts;
@@ -195,7 +191,7 @@ function Dashboard({ profile }) {
     return { collected, outstanding, active, invitational };
   }, [board, coordFilter]);
 
-  const FILTERS = [["all", "All"], ["active", "Active"], ["awaiting_signature", "Awaiting"], ["completed", "Complete"], ["invitational", "Invitational"]];
+  const FILTERS = [["all", "All"], ["active", "Active"], ["awaiting_signature", "Awaiting"], ["completed", "Complete"], ["special_case", "Special"], ["invitational", "Invitational"]];
 
   return (
     <div className="pb-20">
@@ -216,7 +212,7 @@ function Dashboard({ profile }) {
         {screen === "account" && <MyAccount profile={profile} flash={flash} />}
         {screen === "coordinators" && <Coordinators onChange={loadCoords} flash={flash} />}
         {screen === "new" && (
-          <NewApplication profile={profile} onDone={(name) => { setScreen("board"); loadBoard(); flash(`Application sent · terms & sign link emailed to ${name}`); }} />
+          <NewApplication profile={profile} passesLeft={passesLeft} onDone={(name) => { setScreen("board"); loadBoard(); flash(`Application sent · terms & sign link emailed to ${name}`); }} />
         )}
 
         {screen === "board" && (
@@ -236,7 +232,7 @@ function Dashboard({ profile }) {
               <Stat k="Collected" v={money(stats.collected)} sub="JMD" tone="text-brandblue" />
               <Stat k="Outstanding" v={money(stats.outstanding)} sub="JMD" tone="text-slate-900" />
               <Stat k="Active plans" v={stats.active} tone="text-brandpurple" />
-              <Stat k="Invitational" v={stats.invitational} tone="text-amber-600" />
+              <Stat k="Party Passes left" v={passesLeft === null ? "…" : passesLeft} sub={`of ${PARTY_PASS_CAP}`} tone={passesLeft === 0 ? "text-rose-600" : "text-amber-600"} />
             </div>
 
             {isAdmin && (
@@ -310,7 +306,6 @@ const Empty = () => (
   </div>
 );
 
-// ---------- TABLE VIEW ----------
 function TableView({ rows, paidMap, isAdmin, coordMap, onOpen }) {
   if (!rows.length) return <Empty />;
   return (
@@ -321,7 +316,7 @@ function TableView({ rows, paidMap, isAdmin, coordMap, onOpen }) {
             <th className="px-4 py-3">Name</th>
             <th className="px-4 py-3">University</th>
             <th className="px-4 py-3">Plan</th>
-            <th className="px-4 py-3">Deposit</th>
+            <th className="px-4 py-3">Paid at start</th>
             <th className="px-4 py-3">Deadline</th>
             <th className="px-4 py-3">Balance due</th>
             <th className="px-4 py-3">Status</th>
@@ -332,7 +327,7 @@ function TableView({ rows, paidMap, isAdmin, coordMap, onOpen }) {
         <tbody>
           {rows.map((a) => {
             const paid = paidMap[a.id] || 0;
-            const S = STATUS[a.status];
+            const S = STATUS[a.status] || STATUS.active;
             const coord = coordMap[a.coordinator_id];
             return (
               <tr key={a.id} onClick={() => onOpen(a.id)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
@@ -354,11 +349,11 @@ function TableView({ rows, paidMap, isAdmin, coordMap, onOpen }) {
   );
 }
 
-// ---------- CARD ----------
 function Card({ a, paid, isAdmin, coord, onOpen }) {
-  const S = STATUS[a.status];
+  const S = STATUS[a.status] || STATUS.active;
   const remaining = a.total - paid;
   const cta = a.status === "awaiting_signature" ? "Mark as signed" : a.status === "active" ? "Log payment" : a.status === "completed" ? "View summary" : "View details";
+  const ctaTone = a.status === "awaiting_signature" ? "bg-brandpurple hover:bg-brandblue" : "bg-brandblue hover:bg-brandpurple";
   const dleft = daysLeft(a.deadline);
   return (
     <article onClick={onOpen} className={`rise bg-white border border-slate-100 border-l-4 ${S.edge} rounded-2xl p-5 shadow-sm hover:shadow-lg transition cursor-pointer`}>
@@ -375,7 +370,7 @@ function Card({ a, paid, isAdmin, coord, onOpen }) {
         <span className="text-[13px] text-slate-500">{a.university}</span>
       </div>
       <div className="flex items-baseline justify-between gap-2.5 my-4">
-        <span className="text-[26px] font-extrabold tabular-nums tracking-tight"><span className="text-sm text-slate-400 font-semibold">$</span>{remaining.toLocaleString("en-US")}</span>
+        <span className="text-[26px] font-extrabold tabular-nums tracking-tight">{money(remaining)}</span>
         <span className="text-[12.5px] text-slate-500 text-right">remaining<br />of {money(a.total)} · paid <b className="text-brandblue">{money(paid)}</b></span>
       </div>
       <div className="flex items-center gap-2.5 text-[13.5px]">
@@ -383,7 +378,7 @@ function Card({ a, paid, isAdmin, coord, onOpen }) {
         <b className="text-slate-900">{a.deadline}</b>
         {a.status === "active" && <span className="text-slate-400">· {dleft}d left</span>}
       </div>
-      <button className="w-full mt-4 py-3 rounded-xl bg-brandblue hover:bg-brandpurple text-white font-bold text-sm transition">{cta}</button>
+      <button className={`w-full mt-4 py-3 rounded-xl text-white font-bold text-sm transition ${ctaTone}`}>{cta}</button>
       {isAdmin && coord && (
         <div className="flex items-center gap-2 mt-3.5 pt-3.5 border-t border-slate-100 text-[12.5px] text-slate-500">
           Managed by <span className="w-5 h-5 rounded-md grid place-items-center text-white text-[11px]" style={{ background: coord.color }}>{(coord.full_name || "?")[0]}</span>{coord.full_name}
@@ -393,11 +388,10 @@ function Card({ a, paid, isAdmin, coord, onOpen }) {
   );
 }
 
-// ---------- NEW APPLICATION ----------
-function NewApplication({ profile, onDone }) {
+function NewApplication({ profile, passesLeft, onDone }) {
   const [f, setF] = useState({
     member_name: "", email: "", whatsapp: "", university: "UWI Mona", ce_id: "",
-    plan: "Premium", deposit_amount: String(PLANS.Premium.down),
+    plan: PARTY_PASS, deposit_amount: String(PLANS[PARTY_PASS].down),
     deposit_date: todayISO(), deposit_method: "NCB Bank", deadline: "",
   });
   const [receipt, setReceipt] = useState(null);
@@ -417,7 +411,7 @@ function NewApplication({ profile, onDone }) {
   const submit = async () => {
     setErr("");
     if (!f.member_name || !f.email || !f.ce_id) return setErr("Name, email and CE ID are required.");
-    if (openingNum < price.down) return setErr(`The opening payment must be at least the ${money(price.down)} deposit.`);
+    if (openingNum < price.down) return setErr(`The opening payment must be at least ${money(price.down)}.`);
     if (openingNum > price.total) return setErr(`That's more than the ${money(price.total)} plan total.`);
     if (!f.deadline) return setErr("Pick a deadline.");
     if (!receipt) return setErr("The deposit receipt is required to start a plan.");
@@ -445,7 +439,18 @@ function NewApplication({ profile, onDone }) {
           <Field label="University"><select className={INP} value={f.university} onChange={set("university")}><option>UWI Mona</option><option>UTech</option><option>Other</option></select></Field>
           <Field label="CE ID"><input className={INP} value={f.ce_id} onChange={set("ce_id")} placeholder="CE-0000" autoCapitalize="characters" autoCorrect="off" /></Field>
         </div>
-        <Field label="Plan"><select className={INP} value={f.plan} onChange={setPlan}><option>Premium</option><option>Standard</option></select></Field>
+        <Field label="Plan">
+          <select className={INP} value={f.plan} onChange={setPlan}>
+            {PLAN_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </Field>
+        {f.plan === PARTY_PASS && (
+          <div className={`rounded-xl p-3.5 text-[13px] mb-4 ${passesLeft === 0 ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>
+            {passesLeft === 0
+              ? "All 50 Party Passes are secured. A plan can still be opened, but the Pass cannot be secured — clause 8 fallback applies."
+              : `${passesLeft ?? "—"} of ${PARTY_PASS_CAP} Party Passes remain. A deposit does not reserve one — it's secured only on full payment (T&C 7.1).`}
+          </div>
+        )}
         <div className="bg-slate-50 rounded-xl p-3.5 text-sm text-slate-600 mb-4 flex justify-between flex-wrap gap-1">
           <span>Total <b className="text-slate-900">{money(price.total)}</b></span>
           <span>Minimum deposit <b className="text-brandpurple">{money(price.down)}</b></span>
@@ -466,7 +471,7 @@ function NewApplication({ profile, onDone }) {
           <Field label="Payment date"><input className={INP} type="date" max={todayISO()} value={f.deposit_date} onChange={set("deposit_date")} /></Field>
           <Field label="Payment method">
             <select className={INP} value={f.deposit_method} onChange={set("deposit_method")}>
-              <option>NCB Bank</option><option>Other Bank</option><option>Online</option><option>Zelle</option><option>PayPal</option><option>Cash</option>
+              {PAYMENT_METHODS.map((m) => <option key={m}>{m}</option>)}
             </select>
           </Field>
         </div>
@@ -486,7 +491,6 @@ function NewApplication({ profile, onDone }) {
   );
 }
 
-// ---------- COORDINATORS (super admin) ----------
 function Coordinators({ onChange, flash }) {
   const [list, setList] = useState([]);
   const [editing, setEditing] = useState(null);
@@ -535,7 +539,6 @@ function Coordinators({ onChange, flash }) {
   );
 }
 
-// ---------- MY ACCOUNT (self password change) ----------
 function MyAccount({ profile, flash }) {
   const [pw, setPw] = useState(""); const [busy, setBusy] = useState(false);
   const save = async () => {
@@ -557,7 +560,6 @@ function MyAccount({ profile, flash }) {
   );
 }
 
-// ---------- ACCOUNT DETAIL ----------
 function AccountDetail({ id, profile, onClose, onChange, flash }) {
   const [bundle, setBundle] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -571,13 +573,12 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
   const a = bundle.account;
   const paid = bundle.payments.reduce((s, p) => s + p.amount, 0);
   const remaining = a.total - paid;
-  const S = STATUS[a.status];
+  const S = STATUS[a.status] || STATUS.active;
 
   const wrap = async (fn, msg) => { setBusy(true); try { await fn(); await load(); onChange(); msg && flash(msg); } catch (e) { flash(e.message || String(e)); } setBusy(false); };
 
   const doSign = () => wrap(() => api.markSigned(a), "Marked as signed · plan is now active");
   const doPayment = () => wrap(async () => {
-    if (!amt || Number(amt) <= 0) throw new Error("Enter a valid amount");
     await api.logPayment(a, { amount: amt, method, paid_on: paidOn, file }, profile.id);
     setAmt(""); setFile(null); setPaidOn(todayISO());
   }, "Payment logged");
@@ -602,12 +603,12 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
 
       {a.status === "awaiting_signature" && (
         <ActionBox title="Deposit received — waiting on signature" note="The terms & sign link were emailed to the member. Once JotForm notifies you they've signed, mark it here to activate the plan.">
-          <PrimaryBtn busy={busy} onClick={doSign}>Mark as signed</PrimaryBtn>
+          <PrimaryBtn busy={busy} tone="purple" onClick={doSign}>Mark as signed</PrimaryBtn>
         </ActionBox>
       )}
 
       {a.status === "active" && (
-        <ActionBox title="Log a payment" note="Enter the payment details from the receipt the member sent, then confirm to update the balance.">
+        <ActionBox title="Log a payment" note={`Enter the payment details from the receipt the member sent. Maximum ${money(remaining)}.`}>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <input value={amt} onChange={(e) => setAmt(e.target.value)} type="number" inputMode="numeric" placeholder="Amount (JMD)" className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
@@ -621,9 +622,15 @@ function AccountDetail({ id, profile, onClose, onChange, flash }) {
 
       {a.status === "completed" && (
         <div className="bg-blue-50 text-blue-700 rounded-xl p-4 text-sm font-semibold mt-2 mb-4">
-          Plan paid in full · membership activation email sent to admin.
+          Plan paid in full · activation email sent to admin and the code emailed to the member.
           <div className="mt-2 bg-white rounded-lg px-3 py-2 text-slate-900 font-mono text-base tracking-wider inline-block">{a.coupon_code}</div>
-          <p className="text-xs text-blue-600 font-normal mt-1">Hand this code to the member — they enter it at the website to activate their membership.</p>
+        </div>
+      )}
+
+      {a.status === "special_case" && (
+        <div className="bg-rose-50 text-rose-700 rounded-xl p-4 text-sm font-semibold mt-2 mb-4">
+          Flagged for manual review.
+          <p className="text-[13px] font-normal mt-1">{a.special_case_reason || "No reason recorded."}</p>
         </div>
       )}
 
