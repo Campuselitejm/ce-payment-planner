@@ -13,7 +13,7 @@ export const PLAN_KEYS = Object.keys(PLANS);
 // Hard cap on Premium Party Passes (T&C 7.1).
 export const PARTY_PASS_CAP = 30;
 
-export const HARD_DEADLINE = "2026-09-14";
+export const HARD_DEADLINE = "2026-09-30";
 
 export const DEADLINE_OPTIONS = [
   { date: "2026-07-24", label: "Fri, Jul 24" },
@@ -24,7 +24,9 @@ export const DEADLINE_OPTIONS = [
   { date: "2026-08-28", label: "Fri, Aug 28" },
   { date: "2026-09-04", label: "Fri, Sep 4" },
   { date: "2026-09-11", label: "Fri, Sep 11" },
-  { date: "2026-09-14", label: "Mon, Sep 14 — hard deadline" },
+  { date: "2026-09-18", label: "Fri, Sep 18" },
+  { date: "2026-09-25", label: "Fri, Sep 25" },
+  { date: "2026-09-30", label: "Wed, Sep 30 — hard deadline" },
 ];
 
 export function availableDeadlines() {
